@@ -58,7 +58,7 @@ jobs:
 
   base-images:
     runs-on: ubuntu-latest
-    if: github.repository == 'arendst/Tasmota'
+    if: github.repository == 'JorgeBeserra/Tasmota'
     continue-on-error: true
     strategy:
       matrix:
@@ -100,7 +100,7 @@ jobs:
   base32-images:
     needs: safeboot-images
     runs-on: ubuntu-latest
-    if: github.repository == 'arendst/Tasmota'
+    if: github.repository == 'JorgeBeserra/Tasmota'
     continue-on-error: true
     strategy:
       matrix:
@@ -155,7 +155,7 @@ jobs:
   language-images:
     needs: safeboot-images
     runs-on: ubuntu-latest
-    if: github.repository == 'arendst/Tasmota'
+    if: github.repository == 'JorgeBeserra/Tasmota'
     continue-on-error: true
     strategy:
       matrix:
@@ -230,7 +230,7 @@ jobs:
     steps:
     - name: Dispatch workflow in arendst/Tasmota-firmware
       run: |
-         curl -X POST https://api.github.com/repos/arendst/Tasmota-firmware/actions/workflows/fetch_deploy.yml/dispatches \
+         curl -X POST https://api.github.com/repos/JorgeBeserra/Tasmota-firmware/actions/workflows/fetch_deploy.yml/dispatches \
          -H 'Accept: application/vnd.github.everest-preview+json' \
          -u ${{ secrets.API_TOKEN_GITHUB }} \
          --data '{"ref": "gh_actions"}'
