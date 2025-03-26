@@ -29,6 +29,9 @@ const char kTasmotaCommands[] PROGMEM = "|"  // No prefix
   D_CMND_VOLTAGE_RESOLUTION "|" D_CMND_FREQUENCY_RESOLUTION "|" D_CMND_CURRENT_RESOLUTION "|" D_CMND_ENERGY_RESOLUTION "|" D_CMND_WEIGHT_RESOLUTION "|"
   D_CMND_MODULE "|" D_CMND_MODULES "|" D_CMND_GPIO "|" D_CMND_GPIOREAD "|" D_CMND_GPIOS "|" D_CMND_TEMPLATE "|" D_CMND_PWM "|" D_CMND_PWMFREQUENCY "|" D_CMND_PWMRANGE "|"
   D_CMND_BUTTONDEBOUNCE "|" D_CMND_SWITCHDEBOUNCE "|" D_CMND_SYSLOG "|" D_CMND_LOGHOST "|" D_CMND_LOGPORT "|"
+#ifdef USE_UFILESYS
+  D_CMND_FILELOG "|"
+#endif  // USE_UFILESYS
   D_CMND_SERIALBUFFER "|" D_CMND_SERIALSEND "|" D_CMND_BAUDRATE "|" D_CMND_SERIALCONFIG "|" D_CMND_SERIALDELIMITER "|"
   D_CMND_IPADDRESS "|" D_CMND_NTPSERVER "|" D_CMND_AP "|" D_CMND_SSID "|" D_CMND_PASSWORD "|" D_CMND_HOSTNAME "|" D_CMND_WIFICONFIG "|" D_CMND_WIFI "|" D_CMND_DNSTIMEOUT "|"
   D_CMND_DEVICENAME "|" D_CMND_FN "|" D_CMND_FRIENDLYNAME "|" D_CMND_SWITCHMODE "|" D_CMND_INTERLOCK "|" D_CMND_TELEPERIOD "|" D_CMND_RESET "|" D_CMND_TIME "|" D_CMND_TIMEZONE "|" D_CMND_TIMESTD "|"
@@ -69,6 +72,9 @@ void (* const TasmotaCommand[])(void) PROGMEM = {
   &CmndVoltageResolution, &CmndFrequencyResolution, &CmndCurrentResolution, &CmndEnergyResolution, &CmndWeightResolution,
   &CmndModule, &CmndModules, &CmndGpio, &CmndGpioRead, &CmndGpios, &CmndTemplate, &CmndPwm, &CmndPwmfrequency, &CmndPwmrange,
   &CmndButtonDebounce, &CmndSwitchDebounce, &CmndSyslog, &CmndLoghost, &CmndLogport,
+#ifdef USE_UFILESYS
+  &CmndFilelog,
+#endif  // USE_UFILESYS
   &CmndSerialBuffer, &CmndSerialSend, &CmndBaudrate, &CmndSerialConfig, &CmndSerialDelimiter,
   &CmndIpAddress, &CmndNtpServer, &CmndAp, &CmndSsid, &CmndPassword, &CmndHostname, &CmndWifiConfig, &CmndWifi, &CmndDnsTimeout,
   &CmndDevicename, &CmndFriendlyname, &CmndFriendlyname, &CmndSwitchMode, &CmndInterlock, &CmndTeleperiod, &CmndReset, &CmndTime, &CmndTimezone, &CmndTimeStd,
@@ -348,6 +354,13 @@ void ExecuteCommand(const char *cmnd, uint32_t source)
   CommandHandler(stopic, svalue, strlen(svalue));
 }
 
+bool GetFallbackTopicFlag(char* topicBuf) {
+  // Use this function to free CommandHandler stack space from TOPSZ
+  char stemp1[TOPSZ];
+  GetFallbackTopic_P(stemp1, "");        // Full Fallback topic = cmnd/DVES_xxxxxxxx_fb/
+  return (!strncmp(topicBuf, stemp1, strlen(stemp1)));
+}
+
 /********************************************************************************************/
 
 // topicBuf:                    /power1  dataBuf: toggle  = Console command
@@ -369,9 +382,7 @@ void CommandHandler(char* topicBuf, char* dataBuf, uint32_t data_len) {
     }
   }
 
-  char stemp1[TOPSZ];
-  GetFallbackTopic_P(stemp1, "");        // Full Fallback topic = cmnd/DVES_xxxxxxxx_fb/
-  TasmotaGlobal.fallback_topic_flag = (!strncmp(topicBuf, stemp1, strlen(stemp1)));
+  TasmotaGlobal.fallback_topic_flag = GetFallbackTopicFlag(topicBuf);
 
   char *type = strrchr(topicBuf, '/');   // Last part of received topic is always the command (type)
 
@@ -416,11 +427,13 @@ void CommandHandler(char* topicBuf, char* dataBuf, uint32_t data_len) {
   }
 
   Response_P(PSTR("_1"));  // Signal error message for either Command Error or Command Unknown
-  char number[12];
-  char command_line[64];
-  snprintf_P(command_line, sizeof(command_line), PSTR("%s%s%s%s"), 
+  char stemp1[16];
+//  char command_line[64];
+//  snprintf_P(command_line, sizeof(command_line), PSTR("%s%s%s%s"), 
+  char *command_line = (char*)malloc(64);  // Use heap in favour of stack
+  snprintf_P(command_line, 64, PSTR("%s%s%s%s"), 
     type,
-    (index != 1) ? itoa(index, number, 10) : "",
+    (index != 1) ? itoa(index, stemp1, 10) : "",
     (data_len) ? " " : "",
     (data_len) ? (binary_data) ? HexToString((uint8_t*)dataBuf, data_len).c_str() : EscapeJSONString(dataBuf).c_str() : "");
 
@@ -483,6 +496,7 @@ void CommandHandler(char* topicBuf, char* dataBuf, uint32_t data_len) {
     }
     ResponseAppend_P(PSTR(",\"Input\":\"%s\"}"), command_line);
   }
+  free(command_line);
 
   if (ResponseLength()) {
     if (TasmotaGlobal.no_mqtt_response){  // If it is activated, Tasmota will not publish MQTT messages, but it will proccess event trigger rules
@@ -914,11 +928,19 @@ void CmndStatus(void)
   }
 
   if ((0 == payload) || (3 == payload)) {
-    Response_P(PSTR("{\"" D_CMND_STATUS D_STATUS3_LOGGING "\":{\"" D_CMND_SERIALLOG "\":%d,\"" D_CMND_WEBLOG "\":%d,\"" D_CMND_MQTTLOG "\":%d,\"" D_CMND_SYSLOG "\":%d,\""
-                          D_CMND_LOGHOST "\":\"%s\",\"" D_CMND_LOGPORT "\":%d,\"" D_CMND_SSID "\":[\"%s\",\"%s\"],\"" D_CMND_TELEPERIOD "\":%d,\""
+    Response_P(PSTR("{\"" D_CMND_STATUS D_STATUS3_LOGGING "\":{\"" D_CMND_SERIALLOG "\":%d,\"" D_CMND_WEBLOG "\":%d,\"" D_CMND_MQTTLOG "\":%d,\"" 
+#ifdef USE_UFILESYS
+                          D_CMND_FILELOG "\":%d,\"" 
+#endif  // USE_UFILESYS
+                          D_CMND_SYSLOG "\":%d,\"" D_CMND_LOGHOST "\":\"%s\",\"" D_CMND_LOGPORT "\":%d,\"" 
+                          D_CMND_SSID "\":[\"%s\",\"%s\"],\"" D_CMND_TELEPERIOD "\":%d,\""
                           D_JSON_RESOLUTION "\":\"%08X\",\"" D_CMND_SETOPTION "\":[\"%08X\",\"%s\",\"%08X\",\"%08X\",\"%08X\",\"%08X\"]}}"),
-                          Settings->seriallog_level, Settings->weblog_level, Settings->mqttlog_level, Settings->syslog_level,
-                          SettingsText(SET_SYSLOG_HOST), Settings->syslog_port, EscapeJSONString(SettingsText(SET_STASSID1)).c_str(), EscapeJSONString(SettingsText(SET_STASSID2)).c_str(), Settings->tele_period,
+                          Settings->seriallog_level, Settings->weblog_level, Settings->mqttlog_level,
+#ifdef USE_UFILESYS
+                          Settings->filelog_level,
+#endif  // USE_UFILESYS
+                          Settings->syslog_level, SettingsText(SET_SYSLOG_HOST), Settings->syslog_port,
+                          EscapeJSONString(SettingsText(SET_STASSID1)).c_str(), EscapeJSONString(SettingsText(SET_STASSID2)).c_str(), Settings->tele_period,
                           Settings->flag2.data, Settings->flag.data, ToHex_P((unsigned char*)Settings->param, PARAM8_SIZE, stemp2, sizeof(stemp2)),
                           Settings->flag3.data, Settings->flag4.data, Settings->flag5.data, Settings->flag6.data);
     CmndStatusResponse(3);
@@ -1011,10 +1033,14 @@ void CmndStatus(void)
   }
 
   if (((0 == payload) || (6 == payload)) && Settings->flag.mqtt_enabled) {  // SetOption3 - Enable MQTT
+    uint32_t mqtt_tls = 0;
+#ifdef USE_MQTT_TLS
+    mqtt_tls = MqttTLSEnabled() ? 1 : 0;
+#endif // USE_MQTT_TLS
     Response_P(PSTR("{\"" D_CMND_STATUS D_STATUS6_MQTT "\":{\"" D_CMND_MQTTHOST "\":\"%s\",\"" D_CMND_MQTTPORT "\":%d,\"" D_CMND_MQTTCLIENT D_JSON_MASK "\":\"%s\",\""
-                          D_CMND_MQTTCLIENT "\":\"%s\",\"" D_CMND_MQTTUSER "\":\"%s\",\"" D_JSON_MQTT_COUNT "\":%d,\"MAX_PACKET_SIZE\":%d,\"KEEPALIVE\":%d,\"SOCKET_TIMEOUT\":%d}}"),
+                          D_CMND_MQTTCLIENT "\":\"%s\",\"" D_CMND_MQTTUSER "\":\"%s\",\"" D_JSON_MQTT_COUNT "\":%d,\"" D_JSON_MQTT_TLS "\":%d,\"MAX_PACKET_SIZE\":%d,\"KEEPALIVE\":%d,\"SOCKET_TIMEOUT\":%d}}"),
                           SettingsText(SET_MQTT_HOST), Settings->mqtt_port, EscapeJSONString(SettingsText(SET_MQTT_CLIENT)).c_str(),
-                          TasmotaGlobal.mqtt_client, EscapeJSONString(SettingsText(SET_MQTT_USER)).c_str(), MqttConnectCount(), MQTT_MAX_PACKET_SIZE, Settings->mqtt_keepalive, Settings->mqtt_socket_timeout);
+                          TasmotaGlobal.mqtt_client, EscapeJSONString(SettingsText(SET_MQTT_USER)).c_str(), MqttConnectCount(), mqtt_tls, MQTT_MAX_PACKET_SIZE, Settings->mqtt_keepalive, Settings->mqtt_socket_timeout);
     CmndStatusResponse(6);
   }
 
@@ -1797,8 +1823,11 @@ void CmndModules(void)
   ResponseJsonEndEnd();
 }
 
-void CmndGpio(void)
-{
+void CmndGpio(void) {
+  // Gpio         - Show all GPIOs available in module configuration
+  // Gpio 1       - Show all GPIOs in use in module configuration
+  // Gpio 255     - Show all GPIOs available in template configuration
+  // Gpio2 224    - Set GPIO2 as Relay1
   if (XdrvMailbox.index < nitems(Settings->my_gp.io)) {
     myio template_gp;
     TemplateGpios(&template_gp);
@@ -1826,18 +1855,15 @@ void CmndGpio(void)
     bool jsflg2 = false;
     for (uint32_t i = 0; i < nitems(Settings->my_gp.io); i++) {
       if (ValidGPIO(i, template_gp.io[i]) || ((255 == XdrvMailbox.payload) && !FlashPin(i))) {
-        if (!jsflg) {
-          Response_P(PSTR("{"));
-        } else {
-          ResponseAppend_P(PSTR(","));
-        }
-        jsflg = true;
         uint32_t sensor_type = Settings->my_gp.io[i];
         if (!ValidGPIO(i, template_gp.io[i])) {
           sensor_type = template_gp.io[i];
           if (AGPIO(GPIO_USER) == sensor_type) {  // A user GPIO equals a not connected (=GPIO_NONE) GPIO here
             sensor_type = GPIO_NONE;
           }
+        }
+        if ((1 == XdrvMailbox.payload) && (GPIO_NONE == sensor_type)) {
+          continue;
         }
         char sindex[4] = { 0 };
         uint32_t sensor_name_idx = BGPIO(sensor_type);
@@ -1854,8 +1880,14 @@ void CmndGpio(void)
           sensor_name_idx = sensor_name_idx - GPIO_FIX_START -1;
           sensor_names = kSensorNamesFixed;
         }
+        if (!jsflg) {
+          Response_P(PSTR("{"));
+        } else {
+          ResponseAppend_P(PSTR(","));
+        }
+        jsflg = true;
         char stemp1[TOPSZ];
-        ResponseAppend_P(PSTR("\"" D_CMND_GPIO "%d\":{\"%d\":\"%s%s\"}"), i, sensor_type, GetTextIndexed(stemp1, sizeof(stemp1), sensor_name_idx, sensor_names), sindex);
+        ResponseAppend_P(PSTR("\"" D_CMND_GPIO "%d\":{\"%s%s\":%d}"), i, GetTextIndexed(stemp1, sizeof(stemp1), sensor_name_idx, sensor_names), sindex, sensor_type);
         jsflg2 = true;
       }
     }
@@ -1909,7 +1941,7 @@ void ShowGpios(const uint16_t *NiceList, uint32_t size, uint32_t offset, uint32_
     }
     jsflg = true;
     char stemp1[TOPSZ];
-    if ((ResponseAppend_P(PSTR("\"%d\":\"%s\""), ridx, GetTextIndexed(stemp1, sizeof(stemp1), midx, kSensorNames)) > (MAX_LOGSZ - TOPSZ)) || (i == size -1)) {
+    if ((ResponseAppend_P(PSTR("\"%s\":%d"), GetTextIndexed(stemp1, sizeof(stemp1), midx, kSensorNames), ridx) > (MAX_LOGSZ - TOPSZ)) || (i == size -1)) {
       ResponseJsonEndEnd();
       MqttPublishPrefixTopicRulesProcess_P(RESULT_OR_STAT, XdrvMailbox.command);
       jsflg = false;
@@ -2138,6 +2170,29 @@ void CmndLogport(void)
   }
   ResponseCmndNumber(Settings->syslog_port);
 }
+
+#ifdef USE_UFILESYS
+void CmndFilelog(void) {
+  // Filelog 0      - Disable file logging
+  // Filelog 1..4   - Enable rotating file logging
+  // Filelog 10     - Remove log files and disable file logging
+  // Filelog 11..14 - Remove log files and enable file logging until filesystem is full or max rotates
+  if (XdrvMailbox.payload >= LOG_LEVEL_NONE) {
+    uint32_t filelog_level = XdrvMailbox.payload % 10;
+    uint32_t filelog_option = XdrvMailbox.payload / 10;
+    if (1 == filelog_option) {                 // Enable file logging until filesystem is full
+      FileLoggingDelete();                     // Remove all log files
+      if (LOG_LEVEL_NONE == filelog_level) {   // Remove log files and disable logging
+        filelog_option = 0;
+      }
+    }
+    if ((filelog_level >= LOG_LEVEL_NONE) && (filelog_level <= LOG_LEVEL_DEBUG_MORE)) {
+      Settings->filelog_level = (filelog_option * 10) + filelog_level;
+    }
+  }
+  ResponseCmndNumber(Settings->filelog_level);
+}
+#endif  // USE_UFILESYS
 
 void CmndIpAddress(void)
 {
@@ -2701,6 +2756,8 @@ void CmndWifi(void) {
       {
         Settings->flag4.network_wifi = XdrvMailbox.payload;
         if (Settings->flag4.network_wifi) {
+//          TasmotaGlobal.wifi_state_flag = WIFI_RESTART;
+//          WifiConnect();
 #ifdef ESP32
           WifiConnect();
 #else   // ESP8266
