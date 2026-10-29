@@ -16,6 +16,62 @@
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <limits.h>
+#include <float.h>
+#include <math.h>
+
+#ifdef TASMOTA
+/* In Tasmota builds linked against picolibc's integer-only vfprintf
+ * (see `pio-tools/picolibc_flags.py`), the standard snprintf family
+ * cannot format floating point values anymore and outputs `*float*`
+ * placeholders instead. We route Berry's float formatting through
+ * Tasmota's ext_snprintf_P helper which performs its own float
+ * conversion via dtostrf and does not rely on vfprintf for floats.
+ */
+#include "ext_printf.h"
+
+/* Format a breal using ext_snprintf_P (dtostrf-based) and delegate
+ * width/alignment to snprintf via `%s`. Precision after '.' is honored;
+ * 'g'/'G' strip trailing zeros; 'e'/'E' fall back to fixed notation.
+ */
+static int be_snprintf_real(char *buf, size_t buf_len, const char *mode, breal val)
+{
+    const char *dot = strchr(mode, '.');
+    int prec = dot ? (int)strtol(dot + 1, NULL, 10) : 6;
+    char spec = mode[strlen(mode) - 1];
+    if (spec == 'g' || spec == 'G') { prec = -prec; }  /* trim trailing zeros */
+    float fval = (float)val;
+    char num[32];
+    ext_snprintf_P(num, sizeof(num), "%*_f", prec, &fval);
+    /* Rewrite "%[flags][width][.prec]<spec>" as "%[flags][width]s" */
+    char fmt[24];
+    size_t keep = dot ? (size_t)(dot - mode) : strlen(mode) - 1;
+    if (keep >= sizeof(fmt) - 1) { keep = sizeof(fmt) - 2; }
+    memcpy(fmt, mode, keep);
+    fmt[keep] = 's';
+    fmt[keep + 1] = '\0';
+    return snprintf(buf, buf_len, fmt, num);
+}
+#endif /* TASMOTA */
+
+#if BE_INTGER_TYPE == 0 /* int */
+    #define M_IMAX    INT_MAX
+    #define M_IMIN    INT_MIN
+#elif BE_INTGER_TYPE == 1 /* long */
+    #define M_IMAX    LONG_MAX
+    #define M_IMIN    LONG_MIN
+#else /* int64_t (long long) */
+    #define M_IMAX    LLONG_MAX
+    #define M_IMIN    LLONG_MIN
+#endif
+
+#if BE_USE_SINGLE_FLOAT == 0 /* double */
+    #define BREAL_MAX DBL_MAX
+    #define BREAL_MIN DBL_MIN
+#else
+    #define BREAL_MAX FLT_MAX
+    #define BREAL_MIN FLT_MIN
+#endif
 
 #define is_space(c)     ((c) == ' ' || (c) == '\t' || (c) == '\r' || (c) == '\n')
 #define is_digit(c)     ((c) >= '0' && (c) <= '9')
@@ -55,6 +111,50 @@ bstring* be_strcat(bvm *vm, bstring *s1, bstring *s2)
     }
 }
 
+bstring* be_strmul(bvm *vm, bstring *s1, bint n)
+{
+    /* Handle edge cases */
+    if (n == 1) {
+        return s1;
+    }
+
+    size_t string_len = (size_t)str_len(s1);
+    if ((n <= 0) || (string_len == 0)) {
+        return be_newstrn(vm, "", 0);
+    }
+    
+    /* Check for potential overflow */
+    if (n > (bint)(vm->bytesmaxsize / string_len)) {
+        be_raise(vm, "runtime_error", "string multiplication result too large");
+    }
+    
+    size_t total_len = string_len * (size_t)n;
+    
+    /* Use the same pattern as be_strcat for short vs long strings */
+    if (total_len <= SHORT_STR_MAX_LEN) {
+        char buf[SHORT_STR_MAX_LEN + 1];
+        const char *src = str(s1);
+        char *dst = buf;
+        
+        for (bint i = 0; i < n; i++) {
+            memcpy(dst, src, string_len);
+            dst += string_len;
+        }
+        buf[total_len] = '\0';
+        return be_newstrn(vm, buf, total_len);
+    } else {
+        /* Long string */
+        bstring *result = be_newstrn(vm, NULL, total_len);
+        char *dst = (char*)str(result);
+        const char *src = str(s1);
+        
+        for (bint i = 0; i < n; i++) {
+            memcpy(dst + i * string_len, src, string_len);
+        }
+        return result;
+    }
+}
+
 int be_strcmp(bstring *s1, bstring *s2)
 {
     if (be_eqstr(s1, s2)) {
@@ -69,7 +169,11 @@ bstring* be_num2str(bvm *vm, bvalue *v)
     if (var_isint(v)) {
         snprintf(buf, sizeof(buf),BE_INT_FORMAT, var_toint(v));
     } else if (var_isreal(v)) {
+#ifdef TASMOTA
+        be_snprintf_real(buf, sizeof(buf), "%g", var_toreal(v));
+#else
         snprintf(buf, sizeof(buf), "%g", var_toreal(v));
+#endif
     } else {
         snprintf(buf, sizeof(buf), "(nan)");
     }
@@ -101,7 +205,11 @@ static bstring* sim2str(bvm *vm, bvalue *v)
         snprintf(sbuf, sizeof(sbuf), BE_INT_FORMAT, var_toint(v));
         break;
     case BE_REAL:
+#ifdef TASMOTA
+        be_snprintf_real(sbuf, sizeof(sbuf), "%g", var_toreal(v));
+#else
         snprintf(sbuf, sizeof(sbuf), "%g", var_toreal(v));
+#endif
         break;
     case BE_CLOSURE: case BE_NTVCLOS: case BE_NTVFUNC: case BE_CTYPE_FUNC:
         snprintf(sbuf, sizeof(sbuf), "<function: %p>", var_toobj(v));
@@ -279,7 +387,7 @@ BERRY_API bint be_str2int(const char *str, const char **endstr)
         /* hex literal */
         str += 2;       /* skip 0x or 0X */
         while ((c = be_char2hex(*str++)) >= 0) {
-            sum = sum * 16 + c;
+            sum = (bint)((buint)sum * 16 + (buint)c);
         }
         if (endstr) {
             *endstr = str - 1;
@@ -292,14 +400,30 @@ BERRY_API bint be_str2int(const char *str, const char **endstr)
             c = *str++;
         }
         while (is_digit(c)) {
-            sum = sum * 10 + c - '0';
+            if (sign == '-') {
+                if (sum < M_IMIN / 10) goto overflow_neg;
+                sum = sum * 10 - (c - '0');
+                if (sum > 0) goto overflow_neg; /* overflow check */
+            } else {
+                if (sum > M_IMAX / 10) goto overflow_pos;
+                sum = sum * 10 + (c - '0');
+                if (sum < 0) goto overflow_pos; /* overflow check */
+            }
             c = *str++;
         }
         if (endstr) {
             *endstr = str - 1;
         }
-        return sign == '-' ? -sum : sum;
+        return sum;
     }
+
+overflow_pos:
+    if (endstr) *endstr = str - 1;
+    return M_IMAX;
+
+overflow_neg:
+    if (endstr) *endstr = str - 1;
+    return M_IMIN;
 }
 
 /*******************************************************************
@@ -317,42 +441,67 @@ BERRY_API breal be_str2real(const char *str, const char **endstr)
 {
     int c, sign;
     breal sum = 0, deci = 0, point = (breal)0.1;
+    
     skip_space(str);
     sign = c = *str++;
-    if (c == '+' || c == '-') {
-        c = *str++;
-    }
+    if (c == '+' || c == '-') c = *str++;   /* skip sign if present */
+    
+    /* Integer part with overflow check */
     while (is_digit(c)) {
-        sum = sum * 10 + c - '0';
+        if (sum > BREAL_MAX / 10) goto overflow;
+        sum = sum * 10 + (c - '0');
+        if (sum > BREAL_MAX) goto overflow;
         c = *str++;
     }
+    
+    /* Fractional part */
     if (c == '.') {
         c = *str++;
         while (is_digit(c)) {
-            deci = deci + ((breal)c - '0') * point;
+            breal digit = (c - '0') * point;
+            if (deci + digit < deci) break; /* precision limit reached */
+            deci += digit;
             point *= (breal)0.1;
             c = *str++;
         }
     }
-    sum = sum + deci;
+    
+    sum += deci;
+    if (sum > BREAL_MAX) goto overflow;
+    
+    /* Scientific notation */
     if (c == 'e' || c == 'E') {
-        int e = 0;
-        breal ratio = (c = *str++) == '-' ? (breal)0.1 : 10;
-        if (c == '+' || c == '-') {
-            c = *str++;
-        }
+        int e = 0, esign = 1;
+        c = *str++;
+        if (c == '-') { esign = -1; c = *str++; }
+        else if (c == '+') c = *str++;
+        
         while (is_digit(c)) {
-            e = e * 10 + c - '0';
+            if (e > 300) goto overflow;
+            e = e * 10 + (c - '0');
             c = *str++;
         }
+        
+        e *= esign;
+        breal ratio = (e < 0) ? (breal)0.1 : 10;
+        if (e < 0) e = -e;
+        
         while (e--) {
+            if (e > 0 && sum > BREAL_MAX / ratio) goto overflow;
             sum *= ratio;
         }
     }
-    if (endstr) {
-        *endstr = str - 1;
-    }
+    
+    if (endstr) *endstr = str - 1;
     return sign == '-' ? -sum : sum;
+
+overflow:
+    if (endstr) *endstr = str - 1;
+#if BE_USE_SINGLE_FLOAT == 0
+    return sign == '-' ? -HUGE_VAL : HUGE_VAL;
+#else
+    return sign == '-' ? -HUGE_VALF : HUGE_VALF;
+#endif
 }
 
 /* convert a string to a number (integer or real).
@@ -557,16 +706,22 @@ static const char* get_mode(const char *str, char *buf, size_t buf_len)
     }
     p = skip2dig(p); /* skip width (2 digits at most) */
     if (*p == '.') {
-        p = skip2dig(++p); /* skip width (2 digits at most) */
+        p = skip2dig(++p); /* skip precision (2 digits at most) */
     }
     *(buf++) = '%';
     size_t mode_size = p - str + 1;
     /* Leave 2 bytes for the leading % and the trailing '\0' */
-    if (mode_size > buf_len - 2) { 
-        mode_size = buf_len - 2;
+    /* Also ensure the format specifier character is always included */
+    if (mode_size > buf_len - 2) {
+        /* truncate flags/width but always keep the conversion specifier */
+        size_t max = buf_len - 2;
+        strncpy(buf, str, max - 1);
+        buf[max - 1] = p[0]; /* conversion specifier */
+        buf[max] = '\0';
+    } else {
+        strncpy(buf, str, mode_size);
+        buf[mode_size] = '\0';
     }
-    strncpy(buf, str, mode_size);
-    buf[mode_size] = '\0';
     return p;
 }
 
@@ -664,7 +819,11 @@ int be_str_format(bvm *vm)
             {
                 breal val;
                 if (convert_to_real(vm, index, &val)) {
+#ifdef TASMOTA
+                    be_snprintf_real(buf, sizeof(buf), mode, val);
+#else
                     snprintf(buf, sizeof(buf), mode, val);
+#endif
                 }
                 be_pushstring(vm, buf);
                 break;
@@ -673,7 +832,7 @@ int be_str_format(bvm *vm)
             {
                 bint val;
                 if (convert_to_int(vm, index, &val)) {
-                    snprintf(buf, sizeof(buf), "%c", (int)val);
+                    snprintf(buf, sizeof(buf), mode, (int)val);
                 }
                 be_pushstring(vm, buf);
                 break;
@@ -681,7 +840,7 @@ int be_str_format(bvm *vm)
             case 's': {
                 const char *s = be_tostring(vm, index);
                 int len = be_strlen(vm, index);
-                if (len > 100 && strlen(mode) == 2) {
+                if (len > 100 && !strchr(mode, '.')) { /* no precision: keep the whole string */
                     be_pushvalue(vm, index);
                 } else {
                     snprintf(buf, sizeof(buf), mode, s);
@@ -692,7 +851,7 @@ int be_str_format(bvm *vm)
             case 'q': {
                 const char *s = be_toescape(vm, index, 'q');
                 int len = be_strlen(vm, index);
-                if (len > 100 && strlen(mode) == 2) {
+                if (len > 100) { /* mode is ignored for %q: keep the whole escaped string */
                     be_pushvalue(vm, index);
                 } else {
                     snprintf(buf, sizeof(buf), "%s", s);
@@ -1009,14 +1168,17 @@ static int str_endswith(bvm *vm)
         bbool result = bfalse;
         const char *s = be_tostring(vm, 1);
         const char *p = be_tostring(vm, 2);
-        size_t len = (size_t)be_strlen(vm, 2);
-        if (case_insensitive) {
-            if (str_strncasecmp(s + (int)strlen(s) - (int)len, p, len) == 0) {
-                result = btrue;
-            }
-        } else {
-            if (strncmp(s + (int)strlen(s) - (int)len, p, len) == 0) {
-                result = btrue;
+        size_t len_s = (size_t)be_strlen(vm, 1);
+        size_t len_p = (size_t)be_strlen(vm, 2);
+        if (len_s >= len_p) {
+            if (case_insensitive) {
+                if (str_strncasecmp(s + (int)len_s - (int)len_p, p, len_p) == 0) {
+                    result = btrue;
+                }
+            } else {
+                if (strncmp(s + (int)len_s - (int)len_p, p, len_p) == 0) {
+                    result = btrue;
+                }
             }
         }
         be_pushbool(vm, result);

@@ -10,12 +10,19 @@
 #include "be_lexer.h"
 #include <string.h>
 #include <math.h>
+#include <ctype.h>
 
 #if BE_USE_JSON_MODULE
+
+#define is_space(c)     ((c) == ' ' || (c) == '\t' || (c) == '\r' || (c) == '\n')
+#define is_digit(c)     ((c) >= '0' && (c) <= '9')
 
 #define MAX_INDENT      24
 #define INDENT_WIDTH    2
 #define INDENT_CHAR     ' '
+
+/* Security: Maximum JSON string length to prevent memory exhaustion attacks */
+#define MAX_JSON_STRING_LEN  (1024 * 1024)  /* 1MB limit */
 
 static const char* parser_value(bvm *vm, const char *json);
 static void value_dump(bvm *vm, int *indent, int idx, int fmt);
@@ -30,11 +37,6 @@ static const char* skip_space(const char *s)
     return s;
 }
 
-static int is_digit(int c)
-{
-    return c >= '0' && c <= '9';
-}
-
 static const char* match_char(const char *json, int ch)
 {
     json = skip_space(json);
@@ -44,41 +46,66 @@ static const char* match_char(const char *json, int ch)
     return NULL;
 }
 
-static int is_object(bvm *vm, const char *class, int idx)
-{
-    if (be_isinstance(vm, idx)) {
-        be_pushvalue(vm, idx);
-        while (1) {
-            be_getsuper(vm, -1);
-            if (be_isnil(vm, -1)) {
-                be_pop(vm, 1);
-                break;
-            }
-            be_remove(vm, -2);
-        }
-        const char *name = be_classname(vm, -1);
-        bbool ret = !strcmp(name, class);
-        be_pop(vm, 1);
-        return ret;
-    }
-    return  0;
-}
-
-static int json_strlen(const char *json)
+/* Calculate the actual buffer size needed for JSON string parsing
+ * accounting for Unicode expansion and security limits */
+static size_t json_strlen_safe(const char *json, size_t *actual_len)
 {
     int ch;
     const char *s = json + 1; /* skip '"' */
-    /* get string length "(\\.|[^"])*" */
+    size_t char_count = 0;
+    size_t byte_count = 0;
+    
     while ((ch = *s) != '\0' && ch != '"') {
+        char_count++;
+        if (char_count > MAX_JSON_STRING_LEN) {
+            return SIZE_MAX; /* String too long */
+        }
+        
         ++s;
         if (ch == '\\') {
             ch = *s++;
             if (ch == '\0') {
-                return -1;
+                return SIZE_MAX; /* Malformed string */
             }
+            
+            switch (ch) {
+            case '"': case '\\': case '/':
+            case 'b': case 'f': case 'n': case 'r': case 't':
+                byte_count += 1;
+                break;
+            case 'u':
+                /* Unicode can expand to 1-3 UTF-8 bytes
+                 * We conservatively assume 3 bytes for safety */
+                byte_count += 3;
+                /* Verify we have 4 hex digits following */
+                for (int i = 0; i < 4; i++) {
+                    if (!s[i] || !isxdigit((unsigned char)s[i])) {
+                        return SIZE_MAX; /* Invalid unicode sequence */
+                    }
+                }
+                s += 4; /* Skip the 4 hex digits */
+                break;
+            default:
+                return SIZE_MAX; /* Invalid escape sequence */
+            }
+        } else if (ch >= 0 && ch <= 0x1f) {
+            return SIZE_MAX; /* Unescaped control character */
+        } else {
+            byte_count += 1;
+        }
+        
+        /* Check for potential overflow */
+        if (byte_count > MAX_JSON_STRING_LEN) {
+            return SIZE_MAX;
         }
     }
-    return ch ? cast_int(s - json - 1) : -1;
+    
+    if (ch != '"') {
+        return SIZE_MAX; /* Unterminated string */
+    }
+    
+    *actual_len = char_count;
+    return byte_count;
 }
 
 static void json2berry(bvm *vm, const char *class)
@@ -119,55 +146,94 @@ static const char* parser_null(bvm *vm, const char *json)
 
 static const char* parser_string(bvm *vm, const char *json)
 {
-    if (*json == '"') {
-        int len = json_strlen(json++);
-        if (len > -1) {
-            int ch;
-            char *buf, *dst = buf = be_malloc(vm, len);
-            while ((ch = *json) != '\0' && ch != '"') {
-                ++json;
-                if (ch == '\\') {
-                    ch = *json++; /* skip '\' */
-                    switch (ch) {
-                    case '"': *dst++ = '"'; break;
-                    case '\\': *dst++ = '\\'; break;
-                    case '/': *dst++ = '/'; break;
-                    case 'b': *dst++ = '\b'; break;
-                    case 'f': *dst++ = '\f'; break;
-                    case 'n': *dst++ = '\n'; break;
-                    case 'r': *dst++ = '\r'; break;
-                    case 't': *dst++ = '\t'; break;
-                    case 'u': { /* load unicode */
-                        dst = be_load_unicode(dst, json);
-                        if (dst == NULL) {
-                            be_free(vm, buf, len);
-                            return NULL;
-                        }
-                        json += 4;
-                        break;
-                    }
-                    default: be_free(vm, buf, len); return NULL; /* error */
-                    }
-                } else if(ch >= 0 && ch <= 0x1f) {
-                    /* control characters must be escaped
-                       as per https://www.rfc-editor.org/rfc/rfc7159#section-7 */
-                    be_free(vm, buf, len);
+    if (*json != '"') {
+        return NULL;
+    }
+    
+    size_t char_len;
+    size_t byte_len = json_strlen_safe(json, &char_len);
+    
+    if (byte_len == SIZE_MAX) {
+        return NULL; /* Invalid or too long string */
+    }
+    
+    if (byte_len == 0) {
+        /* Empty string */
+        be_stack_require(vm, 1 + BE_STACK_FREE_MIN);
+        be_pushstring(vm, "");
+        return json + 2; /* Skip opening and closing quotes */
+    }
+    
+    /* Allocate buffer - size is correctly calculated by json_strlen_safe */
+    char *buf = be_malloc(vm, byte_len + 1);
+    if (!buf) {
+        return NULL; /* Out of memory */
+    }
+    
+    char *dst = buf;
+    const char *src = json + 1; /* Skip opening quote */
+    int ch;
+    
+    while ((ch = *src) != '\0' && ch != '"') {
+        ++src;
+        if (ch == '\\') {
+            ch = *src++;
+            switch (ch) {
+            case '"': 
+                *dst++ = '"'; 
+                break;
+            case '\\': 
+                *dst++ = '\\'; 
+                break;
+            case '/': 
+                *dst++ = '/'; 
+                break;
+            case 'b': 
+                *dst++ = '\b'; 
+                break;
+            case 'f': 
+                *dst++ = '\f'; 
+                break;
+            case 'n': 
+                *dst++ = '\n'; 
+                break;
+            case 'r': 
+                *dst++ = '\r'; 
+                break;
+            case 't': 
+                *dst++ = '\t'; 
+                break;
+            case 'u': {
+                dst = be_load_unicode(dst, src);
+                if (dst == NULL) {
+                    be_free(vm, buf, byte_len + 1);
                     return NULL;
-                } else {
-                    *dst++ = (char)ch;
                 }
+                src += 4;
+                break;
             }
-            be_assert(ch == '"');
-            /* require the stack to have some free space for the string, 
-               since parsing deeply nested objects might
-               crash the VM due to insufficient stack space. */
-            be_stack_require(vm, 1 + BE_STACK_FREE_MIN);
-            be_pushnstring(vm, buf, cast_int(dst - buf));
-            be_free(vm, buf, len);
-            return json + 1; /* skip '"' */
+            default: 
+                be_free(vm, buf, byte_len + 1);
+                return NULL; /* Invalid escape */
+            }
+        } else if (ch >= 0 && ch <= 0x1f) {
+            be_free(vm, buf, byte_len + 1);
+            return NULL; /* Unescaped control character */
+        } else {
+            *dst++ = (char)ch;
         }
     }
-    return NULL;
+    
+    if (ch != '"') {
+        be_free(vm, buf, byte_len + 1);
+        return NULL; /* Unterminated string */
+    }
+    
+    /* Success - create Berry string */
+    be_stack_require(vm, 1 + BE_STACK_FREE_MIN);
+    be_pushnstring(vm, buf, (size_t)(dst - buf));
+    be_free(vm, buf, byte_len + 1);
+    return src + 1; /* Skip closing quote */
 }
 
 static const char* parser_field(bvm *vm, const char *json)
@@ -249,90 +315,114 @@ static const char* parser_array(bvm *vm, const char *json)
     return json;
 }
 
+enum {
+    JSON_NUMBER_INVALID = 0,
+    JSON_NUMBER_INTEGER = 1,
+    JSON_NUMBER_REAL = 2
+};
+
+int check_json_number(const char *json) {
+    if (!json || *json == '\0') {
+        return JSON_NUMBER_INVALID;
+    }
+    
+    const char *p = json;
+    bbool has_fraction = bfalse;
+    bbool has_exponent = bfalse;
+    
+    // Skip leading whitespace
+    while (is_space(*p)) {
+        p++;
+    }
+    
+    if (*p == '\0') {
+        return JSON_NUMBER_INVALID;
+    }
+    
+    // Handle optional minus sign
+    if (*p == '-') {
+        p++;
+        if (*p == '\0') {
+            return JSON_NUMBER_INVALID;
+        }
+    }
+    
+    // Integer part
+    if (*p == '0') {
+        // If starts with 0, next char must not be a digit (unless it's decimal point or exponent)
+        p++;
+        if (is_digit(*p)) {
+            return JSON_NUMBER_INVALID; // Leading zeros not allowed (except standalone 0)
+        }
+    } else if (is_digit(*p)) {
+        // First digit must be 1-9, then any digits
+        p++;
+        while (is_digit(*p)) {
+            p++;
+        }
+    } else {
+        return JSON_NUMBER_INVALID; // Must start with digit
+    }
+    
+    // Optional fractional part
+    if (*p == '.') {
+        has_fraction = btrue;
+        p++;
+        if (!is_digit(*p)) {
+            return JSON_NUMBER_INVALID; // Must have at least one digit after decimal point
+        }
+        while (is_digit(*p)) {
+            p++;
+        }
+    }
+    
+    // Optional exponent part
+    if (*p == 'e' || *p == 'E') {
+        has_exponent = btrue;
+        p++;
+        // Optional sign in exponent
+        if (*p == '+' || *p == '-') {
+            p++;
+        }
+        if (!is_digit(*p)) {
+            return JSON_NUMBER_INVALID; // Must have at least one digit in exponent
+        }
+        while (is_digit(*p)) {
+            p++;
+        }
+    }
+    
+    // Number ends here - check that next char is not a continuation
+    // Valid JSON number termination: whitespace, null, or JSON delimiters
+    if (*p != '\0' && !is_space(*p) && *p != ',' && *p != ']' && *p != '}' && *p != ':') {
+        return JSON_NUMBER_INVALID;
+    }
+    
+    // Determine return value based on what was found
+    // Any number with exponent (e/E) is always real, regardless of fractional part
+    if (has_exponent || has_fraction) {
+        return JSON_NUMBER_REAL; // real number
+    } else {
+        return JSON_NUMBER_INTEGER; // integer
+    }
+}
+
 static const char* parser_number(bvm *vm, const char *json)
 {
-    char c = *json++;
-    bbool is_neg = c == '-';
-    if(is_neg) {
-        c = *json++;
-        if(!is_digit(c)) {
-            /* minus must be followed by digit */
-            return NULL;
-        }
+    const char *endstr = NULL;
+    int number_type = check_json_number(json);
+    
+    switch (number_type) {
+    case JSON_NUMBER_INTEGER:
+        be_pushint(vm, be_str2int(json, &endstr));
+        break;
+    case JSON_NUMBER_REAL:
+        be_pushreal(vm, be_str2real(json, &endstr));
+        break;
+    default:
+        endstr = NULL;
     }
-    bint intv = 0;
-    if(c != '0') {
-        /* parse integer part */
-        while(is_digit(c)) {
-            intv = intv * 10 + c - '0';
-            c = *json++;
-        }
-
-    } else {
-        /* 
-            Number starts with zero, this is only allowed  
-            if the number is just '0' or 
-            it has a fractional part or exponent.
-        */
-       c = *json++;
-
-    }
-    if(c != '.' && c != 'e' && c != 'E') {
-        /* 
-           No fractional part or exponent follows, this is an integer.
-           If digits follow after it (for example due to a leading zero) 
-           this will cause an error in the calling function.
-        */
-        be_pushint(vm, intv * (is_neg ? -1 : 1));
-        json--;
-        return json;
-    }
-    breal realval = (breal) intv;
-    if(c == '.') {
-
-        breal deci = 0.0, point = 0.1;
-        /* fractional part */
-        c = *json++;
-        if(!is_digit(c)) {
-            /* decimal point must be followed by digit */
-            return NULL;
-        }
-        while (is_digit(c)) {
-            deci = deci + ((breal)c - '0') * point;
-            point *= (breal)0.1;
-            c = *json++;
-        }
-
-        realval += deci;
-    }
-    if(c == 'e' || c == 'E') {
-        c = *json++;
-        /* exponent part */
-        breal ratio = c == '-' ? (breal)0.1 : 10;
-        if (c == '+' || c == '-') {
-            c = *json++;
-            if(!is_digit(c)) {
-                return NULL;
-            }
-        }
-        if(!is_digit(c)) {
-            /* e and sign must be followed by digit */
-            return NULL;
-        }
-        unsigned int e = 0;
-        while (is_digit(c)) {
-            e = e * 10 + c - '0';
-            c = *json++;
-        }
-        /* e > 0 must be here to prevent infinite loops when e overflows */
-        while (e--) {
-            realval *= ratio;
-        }
-   }
-
-   be_pushreal(vm, realval * (is_neg ? -1.0 : 1.0));
-   json--;
-   return json;
+    return endstr;
 }
 
 /* parser json value */
@@ -398,6 +488,75 @@ void string_dump(bvm *vm, int index)
     be_tostring(vm, index); /* convert value to string */
     be_toescape(vm, index, 'u');
     be_pushvalue(vm, index);
+}
+
+/* Custom serialization of instances through a `tojson()` method.
+ *
+ * Any instance can control how `json.dump()` serializes it by implementing:
+ *
+ *     def tojson(indent)
+ *
+ * Argument (optional, a `tojson()` declared without argument is valid since
+ * Berry silently ignores extra arguments):
+ *   `indent`: `nil` when `json.dump()` was called without the `"format"` option,
+ *             i.e. the output must be compact.
+ *             Otherwise an `int`, the current nesting level of this value, `0`
+ *             at top-level, each level being `INDENT_WIDTH` (2) spaces. The
+ *             opening indentation is already emitted by the caller, so only
+ *             continuation lines need to be indented (at `indent`, and
+ *             `indent+1` for nested content).
+ *             `nil` and `0` must be distinguished, hence `nil` rather than `0`
+ *             for the compact case: a top-level value is at level `0` in both
+ *             modes, so the type of `indent` is what carries the mode.
+ *             In compact mode the argument is simply not passed, and Berry
+ *             defaults it to `nil`, so a vararg `tojson(*a)` sees `[]`.
+ *
+ * Return value:
+ *   A `string` inserted *verbatim* in the output. No JSON syntax check is done,
+ *   and no quoting nor escaping is applied: the method is fully responsible for
+ *   emitting valid JSON. This is what allows returning a JSON object, array,
+ *   number or `null`, and not only a JSON string. Note that returning a JSON
+ *   string requires the quotes to be part of the returned value, and the content
+ *   to be escaped, e.g. `return '"hello"'`.
+ *   `nil` means "no custom serialization", and `json.dump()` falls back to its
+ *   default behavior for this value.
+ *   Any other type raises `type_error`.
+ *
+ * Instances without a `tojson()` method are unaffected and keep being dumped as
+ * the JSON string of their `tostring()` representation.
+ *
+ * This function returns `btrue` if the value was serialized by `tojson()`, and
+ * the resulting string is left on top of the stack. It returns `bfalse` if the
+ * value is not an instance, has no `tojson` method, or `tojson()` returned
+ * `nil`, and the stack is left unchanged. */
+static bbool instance_dump(bvm *vm, int *indent, int idx, int fmt)
+{
+    if (!be_isinstance(vm, idx)) { return bfalse; }
+    be_stack_require(vm, 3 + BE_STACK_FREE_MIN); /* method + self + 1 arg */
+    idx = be_absindex(vm, idx); /* we push values below, `idx` must not be relative */
+    if (!be_getmethod(vm, idx, "tojson")) {
+        be_pop(vm, 1); /* `be_getmethod` always pushes a value, remove it */
+        return bfalse;
+    }
+    be_pushvalue(vm, idx); /* push instance as first argument (self) */
+    int argc = 1; /* self */
+    if (fmt) {
+        be_pushint(vm, *indent);
+        argc++;
+    } /* else don't pass `indent` at all, Berry defaults missing arguments to `nil` */
+    be_call(vm, argc);
+    be_pop(vm, argc); /* remove self and arg, the return value is now on top */
+    if (be_isnil(vm, -1)) { /* `nil` means: use the default serialization */
+        be_pop(vm, 1);
+        return bfalse;
+    }
+    if (!be_isstring(vm, -1)) {
+        const char *name = be_classname(vm, idx);
+        be_raise(vm, "type_error", be_pushfstring(vm,
+            "the value of `%s::tojson()` is not a 'string'",
+            (name && strlen(name)) ? name : "<anonymous>"));
+    }
+    return btrue;
 }
 
 static void object_dump(bvm *vm, int *indent, int idx, int fmt)
@@ -477,10 +636,15 @@ static void array_dump(bvm *vm, int *indent, int idx, int fmt)
 
 static void value_dump(bvm *vm, int *indent, int idx, int fmt)
 {
-    // be_stack_require(vm, 1 + BE_STACK_FREE_MIN);
-    if (is_object(vm, "map", idx)) { /* convert to json object */
+    be_stack_require(vm, 1 + BE_STACK_FREE_MIN); /* the isinstance checks below push 1 value */
+    /* `be_ismapinstance()` / `be_islistinstance()` walk the class hierarchy and
+     * compare against the actual builtin `map` / `list` classes, so subclasses
+     * are handled, and a user class that merely shares the name is not. */
+    if (instance_dump(vm, indent, idx, fmt)) { /* an explicit `tojson()` method takes precedence */
+        /* the result was pushed by `instance_dump` */
+    } else if (be_ismapinstance(vm, idx)) { /* convert to json object */
         object_dump(vm, indent, idx, fmt);
-    } else if (is_object(vm, "list", idx)) { /* convert to json array */
+    } else if (be_islistinstance(vm, idx)) { /* convert to json array */
         array_dump(vm, indent, idx, fmt);
     } else if (be_isnil(vm, idx)) { /* convert to json null */
         be_stack_require(vm, 1 + BE_STACK_FREE_MIN); 

@@ -7,6 +7,7 @@
 */
 
 #ifdef ESP32
+#if !CONFIG_IDF_TARGET_ESP32C5 && !CONFIG_IDF_TARGET_ESP32S31 // Legacy TWAI driver is not available on these targets
 #ifdef USE_ESP32_TWAI
 #if SOC_TWAI_SUPPORTED
 /*********************************************************************************************\
@@ -442,4 +443,5 @@ bool Xdrv91(uint32_t function) {
 
 #endif  // SOC_TWAI_SUPPORTED
 #endif  // USE_ESP32_TWAI
+#endif  // !CONFIG_IDF_TARGET_ESP32C5
 #endif  // ESP32

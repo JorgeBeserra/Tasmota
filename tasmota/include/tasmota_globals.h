@@ -57,13 +57,11 @@ void InfluxDbProcess(bool use_copy = false);
 #endif
 
 #ifdef ESP32
-//#if CONFIG_IDF_TARGET_ESP32       // ESP32/PICO-D4
 #ifdef USE_ETHERNET
 IPAddress EthernetLocalIP(void);
 char* EthernetHostname(void);
 String EthernetMacAddress(void);
 #endif  // USE_ETHERNET
-//#endif  // CONFIG_IDF_TARGET_ESP32
 #endif  // ESP32
 
 /*********************************************************************************************\
@@ -73,7 +71,7 @@ String EthernetMacAddress(void);
 #include "include/tasmota_configurations.h"            // Preconfigured configurations
 
 /*********************************************************************************************\
- * Finale overrides
+ * Final overrides
 \*********************************************************************************************/
 
 const char WIFI_HOSTNAME[] = WIFI_DEFAULT_HOSTNAME;    // Override by user_config_override.h
@@ -103,6 +101,8 @@ const char WIFI_HOSTNAME[] = WIFI_DEFAULT_HOSTNAME;    // Override by user_confi
 
 #ifdef ESP8266
 
+#define TASMOTA_ARCH                "esp8266"      // ESP8266 and ESP8285
+
 #ifndef MODULE
 #define MODULE                      SONOFF_BASIC   // [Module] Select default model
 #endif
@@ -113,8 +113,11 @@ const char WIFI_HOSTNAME[] = WIFI_DEFAULT_HOSTNAME;    // Override by user_confi
 #ifndef ARDUINO_ESP8266_RELEASE
 #define ARDUINO_CORE_RELEASE        "STAGE"
 #else
-#define ARDUINO_CORE_RELEASE        ARDUINO_ESP8266_RELEASE
+//#define ARDUINO_CORE_RELEASE        ARDUINO_ESP8266_RELEASE  // 2_7_8
+#define ARDUINO_CORE_RELEASE        "2.7.8"
 #endif  // ARDUINO_ESP8266_RELEASE
+
+#define MAX_I2C                     2
 
 #ifndef USE_ADC_VCC
 #define USE_ADC
@@ -130,58 +133,49 @@ const char WIFI_HOSTNAME[] = WIFI_DEFAULT_HOSTNAME;    // Override by user_confi
 
 #ifdef ESP32
 
-/*-------------------------------------------------------------------------------------------*\
- * Start ESP32 specific parameters - disable features not present in ESP32
-\*-------------------------------------------------------------------------------------------*/
-
-#if CONFIG_IDF_TARGET_ESP32
-
-
-#else   // Disable features not present in other ESP32 like ESP32C3, ESP32S2, ESP32S3 etc.
-//#ifdef USE_ETHERNET
-//#undef USE_ETHERNET                                // All non-ESP32 do not support ethernet
-//#endif
-#endif  // CONFIG_IDF_TARGET_ESP32
-
-/*-------------------------------------------------------------------------------------------*\
- * End ESP32 specific parameters
-\*-------------------------------------------------------------------------------------------*/
-
-/*-------------------------------------------------------------------------------------------*\
- * Start ESP32-C3/C6 specific parameters - disable features not present in ESP32-C3/C6
-\*-------------------------------------------------------------------------------------------*/
-
-#if CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C6  // ESP32-C3/C6
-//#ifdef USE_ETHERNET
-//#undef USE_ETHERNET                                // ESP32-C3/C6 does not support ethernet
-//#endif
-
-#endif  // CONFIG_IDF_TARGET_ESP32C3/C6
-
-/*-------------------------------------------------------------------------------------------*\
- * End ESP32-C3 specific parameters
-\*-------------------------------------------------------------------------------------------*/
-/*-------------------------------------------------------------------------------------------*\
- * Start ESP32-S2 specific parameters - disable features not present in ESP32-S2
-\*-------------------------------------------------------------------------------------------*/
-
-#if CONFIG_IDF_TARGET_ESP32S2                      // ESP32-S2
-//#ifdef USE_ETHERNET
-//#undef USE_ETHERNET                                // ESP32-S2 does not support ethernet
-//#endif
-#ifdef USE_BLE_ESP32
-#undef USE_BLE_ESP32                               // ESP32-S2 does not support BLE
+#if CONFIG_IDF_TARGET_ESP32                        // ESP32/PICO-D4
+  #ifdef CORE32SOLO1
+    #define TASMOTA_ARCH            "esp32solo1"
+  #else
+    #define TASMOTA_ARCH            "esp32"
+  #endif
+#elif CONFIG_IDF_TARGET_ESP32C2
+  #define TASMOTA_ARCH              "esp32c2"
+#elif CONFIG_IDF_TARGET_ESP32C3
+  #define TASMOTA_ARCH              "esp32c3"      // ESP32C3, ESP8685 and ESP8686
+#elif CONFIG_IDF_TARGET_ESP32C5
+  #define TASMOTA_ARCH              "esp32c5"  
+#elif CONFIG_IDF_TARGET_ESP32C6
+  #define TASMOTA_ARCH              "esp32c6"
+#elif CONFIG_IDF_TARGET_ESP32C61
+  #define TASMOTA_ARCH              "esp32c61"
+#elif CONFIG_IDF_TARGET_ESP32H2
+  #define TASMOTA_ARCH              "esp32h2"
+#elif CONFIG_IDF_TARGET_ESP32H4
+  #define TASMOTA_ARCH              "esp32h4"
+#elif CONFIG_IDF_TARGET_ESP32P4
+  #define TASMOTA_ARCH              "esp32p4"
+#elif CONFIG_IDF_TARGET_ESP32S2
+  #define TASMOTA_ARCH              "esp32s2"
+  #ifdef USE_BLE_ESP32
+  #undef USE_BLE_ESP32                             // ESP32-S2 does not support BLE
+  #endif
+  #ifdef USE_MI_ESP32
+  #undef USE_MI_ESP32                              // ESP32-S2 does not support BLE
+  #endif
+  #ifdef USE_IBEACON_ESP32
+  #undef USE_IBEACON_ESP32                         // ESP32-S2 does not support BLE
+  #endif
+#elif CONFIG_IDF_TARGET_ESP32S3
+  #define TASMOTA_ARCH              "esp32s3"
+#elif CONFIG_IDF_TARGET_ESP32S31
+  #define TASMOTA_ARCH              "esp32s31"
+#else
+  #define TASMOTA_ARCH              "esp32"
 #endif
-#ifdef USE_MI_ESP32
-#undef USE_MI_ESP32                                // ESP32-S2 does not support BLE
-#endif
-#ifdef USE_IBEACON_ESP32
-#undef USE_IBEACON_ESP32                           // ESP32-S2 does not support BLE
-#endif
-#endif  // CONFIG_IDF_TARGET_ESP32S2
 
 /*-------------------------------------------------------------------------------------------*\
- * End ESP32-S2 specific parameters
+ * End ESP32 architecture specific parameters
 \*-------------------------------------------------------------------------------------------*/
 
 #ifndef MODULE
@@ -194,15 +188,11 @@ const char WIFI_HOSTNAME[] = WIFI_DEFAULT_HOSTNAME;    // Override by user_confi
 #ifndef ARDUINO_ESP32_RELEASE
 #define ARDUINO_CORE_RELEASE        "STAGE"
 #else
-#define ARDUINO_CORE_RELEASE        ARDUINO_ESP32_RELEASE
+//#define ARDUINO_CORE_RELEASE        ARDUINO_ESP32_RELEASE  // 3_3_0
+#define ARDUINO_CORE_RELEASE        ESP_ARDUINO_VERSION_STR  // 3.3.0
 #endif  // ARDUINO_ESP32_RELEASE
 
-#ifdef USE_I2C_BUS2                                // If defined for ESP8266 undefine first
-#undef USE_I2C_BUS2
-#endif  // USE_I2C_BUS2
-#if SOC_HP_I2C_NUM > 1
-#define USE_I2C_BUS2                               // Redefine based on hardware support
-#endif  // SOC_HP_I2C_NUM
+#define MAX_I2C                     SOC_HP_I2C_NUM
 
 // Hardware has no ESP32
 #undef USE_EXS_DIMMER
@@ -348,7 +338,7 @@ const char WIFI_HOSTNAME[] = WIFI_DEFAULT_HOSTNAME;    // Override by user_confi
 #endif
 
 #ifndef EMULATION
-#define EMULATION                   EMUL_NONE  // [Emulation] Select Belkin WeMo (single relay/light) or Hue Bridge emulation (multi relay/light) (EMUL_NONE, EMUL_WEMO or EMUL_HUE)
+#define EMULATION                   EMUL_NONE  // [Emulation] Select Belkin WeMo (single relay/light), Hue Bridge (multi relay/light) or Shelly emulation (EMUL_NONE, EMUL_WEMO, EMUL_HUE or EMUL_SHELLY)
 #endif
 
 #ifndef MTX_ADDRESS1                           // Add Display Support for up to eigth Matrices
@@ -507,7 +497,7 @@ const char WIFI_HOSTNAME[] = WIFI_DEFAULT_HOSTNAME;    // Override by user_confi
 #define COLOR_TITLE_TEXT			      COLOR_TEXT // Title text color defaults to global text color either dark or light
 #endif
 #ifndef COLOR_BUTTON_OFF
-#define COLOR_BUTTON_OFF			      "#08405e"  // Button color when off - Darkest blueish
+#define COLOR_BUTTON_OFF			      "#a1d9f7"  // Button color when off - Light blue
 #endif
 
 enum WebColors {
@@ -580,6 +570,40 @@ bool first_device_group_is_local = true;
 #else
 #define SHOW_FREE_MEM(WHERE)
 #endif
+
+#if defined(ESP32) && defined(USE_HEAP_MAP)     // support_esp32.ino
+#ifndef HEAP_MAP_PERIOD
+#define HEAP_MAP_PERIOD 30                       // seconds between periodic heap map rows after boot, 0 = off
+#endif
+#ifndef HEAP_MAP_CALL_MIN
+#define HEAP_MAP_CALL_MIN 100                    // minimum internal heap change in bytes to log a driver call, 0 = off
+#endif
+#ifndef HEAP_MAP_EVENTS_BOOT_ONLY
+#define HEAP_MAP_EVENTS_BOOT_ONLY 1              // stop logging stages and driver calls once "boot" is logged, keep only the periodic rows
+#endif
+#define HEAP_MAP(STAGE) HeapMapEvent(STAGE);
+#else
+#define HEAP_MAP(STAGE)
+#endif  // ESP32 and USE_HEAP_MAP
+
+// Wrap a driver call: logs the internal heap change of the call if at least HEAP_MAP_CALL_MIN bytes,
+// only for the events listed in support_heap_map.ino (kHeapMapFuncCode and kHeapMapFuncDisplay)
+// TYPE is "xdrv", "xsns", "xlgt", "xnrg" or "xdsp", FUNCTION the FUNC_xxx code
+// ID (read after the call) is the driver number, or HEAP_MAP_ID_POS | position in the driver list if the
+// number is unknown, or HEAP_MAP_ID_DSP | position to ask the display driver with FUNC_DISPLAY_MODEL
+#if defined(ESP32) && defined(USE_HEAP_MAP) && (HEAP_MAP_CALL_MIN > 0)
+#define HEAP_MAP_ID_POS   0x10000
+#define HEAP_MAP_ID_DSP   0x20000
+#define HEAP_MAP_CALL(TYPE, ID, FUNCTION, CALL) ({ \
+  bool _hm_track = HeapMapTracked(((ID) & HEAP_MAP_ID_DSP) != 0, (FUNCTION)); \
+  int32_t _hm_nested = 0; \
+  uint32_t _hm_free = _hm_track ? HeapMapCallStart(&_hm_nested) : 0; \
+  bool _hm_result = (CALL); \
+  if (_hm_track) { HeapMapCallEnd(PSTR(TYPE), (ID), (FUNCTION), _hm_free, _hm_nested); } \
+  _hm_result; })
+#else
+#define HEAP_MAP_CALL(TYPE, ID, FUNCTION, CALL) (CALL)
+#endif  // ESP32 and USE_HEAP_MAP and HEAP_MAP_CALL_MIN
 
 #ifndef USE_PROFILING
 #undef USE_PROFILE_DRIVER

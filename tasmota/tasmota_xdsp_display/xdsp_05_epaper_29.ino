@@ -62,10 +62,10 @@ void EpdInitDriver29(void) {
 
     // whiten display with full update, takes 3 seconds
     if (TasmotaGlobal.soft_spi_enabled) {
-      epd->Begin(Pin(GPIO_EPAPER29_CS), Pin(GPIO_SSPI_MOSI), Pin(GPIO_SSPI_SCLK), Pin(GPIO_OLED_RESET), Pin(GPIO_SSPI_MISO));
+      epd->Begin(Pin(GPIO_EPAPER29_CS), Pin(GPIO_SSPI_MOSI), Pin(GPIO_SSPI_SCLK), Pin(GPIO_DISPLAY_RESET), Pin(GPIO_SSPI_MISO));
     }
     else if (TasmotaGlobal.spi_enabled) {
-      epd->Begin(Pin(GPIO_EPAPER29_CS), Pin(GPIO_SPI_MOSI), Pin(GPIO_SPI_CLK), Pin(GPIO_OLED_RESET));
+      epd->Begin(Pin(GPIO_EPAPER29_CS), Pin(GPIO_SPI_MOSI), Pin(GPIO_SPI_CLK), Pin(GPIO_DISPLAY_RESET));
     }
 
     renderer = epd;
@@ -155,15 +155,10 @@ void EpdRefresh29(void)  // Every second
 
     EpdDrawStringAt(0, 0, tftdt, COLORED, 0);
 */
-    switch (Settings->display_mode) {
-      case 1:  // Text
-      case 2:  // Local
-      case 3:  // Local
-      case 4:  // Mqtt
-      case 5:  // Mqtt
-        EpdPrintLog29();
-        renderer->Updateframe();
-        break;
+
+    if (Settings->display_mode > DM_USER_CONTROL) {
+      EpdPrintLog29();
+      renderer->Updateframe();
     }
 
 //    EpdDisplayFrame();

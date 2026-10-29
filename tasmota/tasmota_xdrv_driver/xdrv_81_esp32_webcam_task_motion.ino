@@ -1,5 +1,5 @@
 /*
-  xdrv_99_esp32_webcamberry.ino - ESP32 webcam support for Tasmota
+  xdrv_81_esp32_webcam_task_motion.ino - ESP32 webcam support for Tasmota
 
   Copyright (C) 2021  Gerhard Mutz and Theo Arends
 
@@ -143,7 +143,7 @@ and/or
 #include "sensor.h"
 #include "fb_gfx.h"
 #include "camera_pins.h"
-#include "esp_jpg_decode.h"
+#include "jpeg_decoder.h"
 //#include "img_converters.h"
 
 extern SemaphoreHandle_t WebcamMutex;

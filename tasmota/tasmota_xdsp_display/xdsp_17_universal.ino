@@ -173,7 +173,7 @@ Renderer *Init_uDisplay(const char *desc) {
       // 22,21,-1
       int8_t scl = replacepin(&cp, Pin(GPIO_I2C_SCL, wire_n));
       int8_t sda = replacepin(&cp, Pin(GPIO_I2C_SDA, wire_n));
-      replacepin(&cp, Pin(GPIO_OLED_RESET));
+      replacepin(&cp, Pin(GPIO_DISPLAY_RESET));
 
       if (wire_n == 0) {
         if (!TasmotaGlobal.i2c_enabled[0]) {
@@ -206,12 +206,12 @@ Renderer *Init_uDisplay(const char *desc) {
       }
     }
 
-    cp = strstr(ddesc, "SPI,");
+    cp = strstr(ddesc, ",SPI,");     // leading comma so that ",QSPI," does not match
     if (cp) {
       // 9 params nr,cs,sclk,mosi,dc,bl,reset,miso,mhz
       // SPI,1,*,*,*,*,*,*,*,80
       // SPI,3,*,*,*,*,*,*,*,40
-      cp += 4;
+      cp += 5;
       // 1,*,*,*,*,*,*,*,80
       uint32_t spi_type = 2;   // SPI,3 = Software SPI
       if ((*cp == '1') || (*cp == '2')) {
@@ -225,7 +225,7 @@ Renderer *Init_uDisplay(const char *desc) {
         replacepin(&cp, Pin(GPIO_SPI_MOSI, spi_type));
         replacepin(&cp, Pin(GPIO_SPI_DC, spi_type));
         replacepin(&cp, Pin(GPIO_BACKLIGHT));
-        replacepin(&cp, Pin(GPIO_OLED_RESET));
+        replacepin(&cp, Pin(GPIO_DISPLAY_RESET));
         replacepin(&cp, Pin(GPIO_SPI_MISO, spi_type));
       } else {                 // SPI,3 is software SPI
         replacepin(&cp, Pin(GPIO_SSPI_CS));
@@ -233,7 +233,7 @@ Renderer *Init_uDisplay(const char *desc) {
         replacepin(&cp, Pin(GPIO_SSPI_MOSI));
         replacepin(&cp, Pin(GPIO_SSPI_DC));
         replacepin(&cp, Pin(GPIO_BACKLIGHT));
-        replacepin(&cp, Pin(GPIO_OLED_RESET));
+        replacepin(&cp, Pin(GPIO_DISPLAY_RESET));
         replacepin(&cp, Pin(GPIO_SSPI_MISO));
       }
     }
@@ -397,11 +397,11 @@ Renderer *Init_uDisplay(const char *desc) {
         if (!wire_n) {
           GT911_Touch_Init(&Wire, irq, rst, xs, ys);
         }
-#if defined(ESP32) && defined(USE_I2C_BUS2)
+#if MAX_I2C > 1
         else {
           GT911_Touch_Init(&Wire1, irq, rst, xs, ys);
         }
-#endif  // ESP32
+#endif  // MAX_I2C
 #endif  // USE_GT911
       } 
       else if (i2caddr == CST816S_address) {
@@ -414,11 +414,11 @@ Renderer *Init_uDisplay(const char *desc) {
         if (!wire_n) { 
           FT5206_Touch_Init(Wire);
         }
-#if defined(ESP32) && defined(USE_I2C_BUS2)
+#if MAX_I2C > 1
         else {
           FT5206_Touch_Init(Wire1);
         }
-#endif  // ESP32
+#endif  // MAX_I2C
 #endif  // USE_FT5206
       }
     }
@@ -492,7 +492,7 @@ Renderer *Init_uDisplay(const char *desc) {
     }*/
     renderer->invertDisplay(iniinv);
 
-    ApplyDisplayDimmer();
+    ApplyDisplayDimmer(GetDisplayDimmer());
 
 #ifdef SHOW_SPLASH
     if (!Settings->flag5.display_no_splash) {  // SetOption135 - (Display & LVGL) force disabling default splash screen
@@ -560,6 +560,7 @@ void UDISP_PrintLog(void) {
     for (byte i = 0; i < last_row; i++) {
       strlcpy(disp_screen_buffer[i], disp_screen_buffer[i +1], disp_screen_buffer_cols);
       renderer->println(disp_screen_buffer[i]);
+      delay(0);   // Fix MQTT timeout
     }
     strlcpy(disp_screen_buffer[last_row], txt, disp_screen_buffer_cols);
     DisplayFillScreen(last_row);
@@ -586,18 +587,11 @@ void UDISP_Time(void) {
 
 void UDISP_Refresh(void) {  // Every second
   if (!renderer) return;
-  if (Settings->display_mode) {  // Mode 0 is User text
-    switch (Settings->display_mode) {
-      case 1:  // Time
-        UDISP_Time();
-        break;
-      case 2:  // Local
-      case 3:  // Local
-      case 4:  // Mqtt
-      case 5:  // Mqtt
-        UDISP_PrintLog();
-        break;
-    }
+  if (DM_TIME == Settings->display_mode) {
+    UDISP_Time();
+  }
+  else if (Settings->display_mode > DM_TIME) {
+    UDISP_PrintLog();
   }
 }
 

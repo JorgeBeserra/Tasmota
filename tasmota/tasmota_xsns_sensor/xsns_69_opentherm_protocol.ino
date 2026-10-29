@@ -16,7 +16,6 @@
   You should have received a copy of the GNU General Public License
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
-
 #ifdef USE_OPENTHERM
 
 #include "OpenTherm.h"
@@ -75,6 +74,14 @@ OpenThermCommand sns_opentherm_commands[] = {
      .m_ot_make_request = sns_opentherm_set_boiler_temperature,
      .m_ot_parse_response = sns_opentherm_parse_set_boiler_temperature,
      .m_ot_appent_telemetry = sns_opentherm_tele_boiler_temperature},
+    {// Set 2nd CH circuit temperature, only sent when CH2 is enabled
+     .m_command_name = "BTMP2",
+     .m_command_code = 0,
+     .m_flags = {.supported = 1},
+     .m_results = {{.m_u8 = 0}, {.m_u8 = 0}},
+     .m_ot_make_request = sns_opentherm_set_boiler2_temperature,
+     .m_ot_parse_response = sns_opentherm_parse_set_boiler_temperature,
+     .m_ot_appent_telemetry = sns_opentherm_tele_boiler_temperature},
     {// Set Hot Water temperature
      .m_command_name = "HWTMP",
      .m_command_code = 0,
@@ -115,6 +122,14 @@ OpenThermCommand sns_opentherm_commands[] = {
      .m_results = {{.m_u8 = 0}, {.m_u8 = 0}},
      .m_ot_make_request = sns_opentherm_get_generic_float,
      .m_ot_parse_response = sns_opentherm_parse_boiler_temperature,
+     .m_ot_appent_telemetry = sns_opentherm_tele_generic_float},
+    {// Read CH2 flow water temperature
+     .m_command_name = "TB2",
+     .m_command_code = (uint8_t)OpenThermMessageID::TflowCH2,
+     .m_flags = 0,
+     .m_results = {{.m_u8 = 0}, {.m_u8 = 0}},
+     .m_ot_make_request = sns_opentherm_get_generic_float,
+     .m_ot_parse_response = sns_opentherm_parse_boiler2_temperature,
      .m_ot_appent_telemetry = sns_opentherm_tele_generic_float},
     {// Read DHW temperature
      .m_command_name = "TDHW",
@@ -214,7 +229,7 @@ OpenThermCommand sns_opentherm_commands[] = {
      .m_ot_appent_telemetry = sns_opentherm_tele_generic_u16},
     {// Number of starts burner
      .m_command_name = "OT116",
-     .m_command_code = (uint8_t)OpenThermMessageID::BurnerStarts,
+     .m_command_code = (uint8_t)OpenThermMessageID::SuccessfulBurnerStarts,
      .m_flags = 0,
      .m_results = {{.m_u8 = 0}, {.m_u8 = 0}},
      .m_ot_make_request = sns_opentherm_get_generic_u16,
@@ -246,7 +261,7 @@ OpenThermCommand sns_opentherm_commands[] = {
      .m_ot_appent_telemetry = sns_opentherm_tele_generic_u16},
     {// Boiler Lock-out Reset command
      .m_command_name = "BLOR",
-     .m_command_code = (uint8_t)OpenThermMessageID::Command,
+     .m_command_code = (uint8_t)OpenThermMessageID::RemoteRequest,
      .m_flags = {.skip = 1},
      .m_results = {{.m_u8 = 0}, {.m_u8 = 0}},
      .m_ot_make_request = sns_opentherm_send_blor,
@@ -284,7 +299,7 @@ unsigned long sns_opentherm_set_slave_flags(struct OpenThermCommandT *self, stru
 
     data <<= 8;
 
-    return OpenTherm::buildRequest(OpenThermRequestType::OPTH_READ, OpenThermMessageID::Status, data);
+    return OpenTherm::buildRequest(OpenThermRequestType::READ, OpenThermMessageID::Status, data);
 }
 
 void sns_opentherm_parse_slave_flags(struct OpenThermCommandT *self, struct OT_BOILER_STATUS_T *boilerStatus, unsigned long response)
@@ -330,7 +345,7 @@ unsigned long sns_opentherm_set_boiler_temperature(struct OpenThermCommandT *sel
     self->m_results[0].m_float = status->m_boilerSetpoint;
 
     unsigned int data = OpenTherm::temperatureToData(status->m_boilerSetpoint);
-    return OpenTherm::buildRequest(OpenThermMessageType::OPTH_WRITE_DATA, OpenThermMessageID::TSet, data);
+    return OpenTherm::buildRequest(OpenThermMessageType::WRITE_DATA, OpenThermMessageID::TSet, data);
 }
 void sns_opentherm_parse_set_boiler_temperature(struct OpenThermCommandT *self, struct OT_BOILER_STATUS_T *boilerStatus, unsigned long response)
 {
@@ -352,6 +367,26 @@ void sns_opentherm_tele_boiler_temperature(struct OpenThermCommandT *self)
                      actual);
 }
 
+/////////////////////////////////// Set 2nd CH Circuit Temperature //////////////////////////////////////////////////
+unsigned long sns_opentherm_set_boiler2_temperature(struct OpenThermCommandT *self, struct OT_BOILER_STATUS_T *status)
+{
+    // The same consideration as for the boiler temperature
+    float diff = abs(status->m_boilerSetpoint2 - self->m_results[0].m_float);
+    if (!status->m_enableCentralHeating2 || diff < OPENTHERM_BOILER_SETPOINT_TOLERANCE)
+    {
+        return -1;
+    }
+    AddLog(LOG_LEVEL_INFO,
+              PSTR("[OTH]: Setting Boiler2 Temp. Old: %d, New: %d"),
+              (int)self->m_results[0].m_float,
+              (int)status->m_boilerSetpoint2);
+
+    self->m_results[0].m_float = status->m_boilerSetpoint2;
+
+    unsigned int data = OpenTherm::temperatureToData(status->m_boilerSetpoint2);
+    return OpenTherm::buildRequest(OpenThermMessageType::WRITE_DATA, OpenThermMessageID::TsetCH2, data);
+}
+
 /////////////////////////////////// Set Domestic Hot Water Temperature //////////////////////////////////////////////////
 unsigned long sns_opentherm_set_boiler_dhw_temperature(struct OpenThermCommandT *self, struct OT_BOILER_STATUS_T *status)
 {
@@ -370,7 +405,7 @@ unsigned long sns_opentherm_set_boiler_dhw_temperature(struct OpenThermCommandT 
     self->m_results[0].m_float = status->m_hotWaterSetpoint;
 
     unsigned int data = OpenTherm::temperatureToData(status->m_hotWaterSetpoint);
-    return OpenTherm::buildRequest(OpenThermMessageType::OPTH_WRITE_DATA, OpenThermMessageID::TdhwSet, data);
+    return OpenTherm::buildRequest(OpenThermMessageType::WRITE_DATA, OpenThermMessageID::TdhwSet, data);
 }
 void sns_opentherm_parse_boiler_dhw_temperature(struct OpenThermCommandT *self, struct OT_BOILER_STATUS_T *boilerStatus, unsigned long response)
 {
@@ -391,7 +426,7 @@ void sns_opentherm_tele_boiler_dhw_temperature(struct OpenThermCommandT *self)
 /////////////////////////////////// App Specific Fault Flags //////////////////////////////////////////////////
 unsigned long sns_opentherm_get_flags(struct OpenThermCommandT *self, struct OT_BOILER_STATUS_T *)
 {
-    return OpenTherm::buildRequest(OpenThermRequestType::OPTH_READ, OpenThermMessageID::ASFflags, 0);
+    return OpenTherm::buildRequest(OpenThermRequestType::READ, OpenThermMessageID::ASFflags, 0);
 }
 
 void sns_opentherm_parse_flags(struct OpenThermCommandT *self, struct OT_BOILER_STATUS_T *boilerStatus, unsigned long response)
@@ -426,7 +461,7 @@ void sns_opentherm_tele_u16(struct OpenThermCommandT *self)
 /////////////////////////////////// OEM Diag Code //////////////////////////////////////////////////
 unsigned long sns_opentherm_get_oem_diag(struct OpenThermCommandT *self, struct OT_BOILER_STATUS_T *)
 {
-    return OpenTherm::buildRequest(OpenThermRequestType::OPTH_READ, OpenThermMessageID::OEMDiagnosticCode, 0);
+    return OpenTherm::buildRequest(OpenThermRequestType::READ, OpenThermMessageID::OEMDiagnosticCode, 0);
 }
 
 void sns_opentherm_parse_oem_diag(struct OpenThermCommandT *self, struct OT_BOILER_STATUS_T *boilerStatus, unsigned long response)
@@ -450,7 +485,7 @@ unsigned long sns_opentherm_send_blor(struct OpenThermCommandT *self, struct OT_
 
     unsigned int data = 1; //1 : “BLOR”= Boiler Lock-out Reset command
     data <<= 8;
-    return OpenTherm::buildRequest(OpenThermMessageType::OPTH_WRITE_DATA, OpenThermMessageID::Command, data);
+    return OpenTherm::buildRequest(OpenThermMessageType::WRITE_DATA, OpenThermMessageID::RemoteRequest, data);
 }
 
 bool sns_opentherm_call_blor() 
@@ -470,7 +505,7 @@ bool sns_opentherm_call_blor()
 /////////////////////////////////// Generic Single Float /////////////////////////////////////////////////
 unsigned long sns_opentherm_get_generic_float(struct OpenThermCommandT *self, struct OT_BOILER_STATUS_T *)
 {
-    return OpenTherm::buildRequest(OpenThermRequestType::OPTH_READ, (OpenThermMessageID)self->m_command_code, 0);
+    return OpenTherm::buildRequest(OpenThermRequestType::READ, (OpenThermMessageID)self->m_command_code, 0);
 }
 
 void sns_opentherm_parse_generic_float(struct OpenThermCommandT *self, struct OT_BOILER_STATUS_T *boilerStatus, unsigned long response)
@@ -488,7 +523,7 @@ void sns_opentherm_tele_generic_float(struct OpenThermCommandT *self)
 /////////////////////////////////// Generic U16 /////////////////////////////////////////////////
 unsigned long sns_opentherm_get_generic_u16(struct OpenThermCommandT *self, struct OT_BOILER_STATUS_T *)
 {
-    return OpenTherm::buildRequest(OpenThermRequestType::OPTH_READ, (OpenThermMessageID)self->m_command_code, 0);
+    return OpenTherm::buildRequest(OpenThermRequestType::READ, (OpenThermMessageID)self->m_command_code, 0);
 }
 
 void sns_opentherm_parse_generic_u16(struct OpenThermCommandT *self, struct OT_BOILER_STATUS_T *boilerStatus, unsigned long response)
@@ -518,6 +553,12 @@ void sns_opentherm_parse_boiler_temperature(struct OpenThermCommandT *self, stru
 {
     self->m_results[0].m_float = OpenTherm::getFloat(response);
     boilerStatus->m_boiler_temperature_read = self->m_results[0].m_float;
+}
+
+void sns_opentherm_parse_boiler2_temperature(struct OpenThermCommandT *self, struct OT_BOILER_STATUS_T *boilerStatus, unsigned long response)
+{
+    self->m_results[0].m_float = OpenTherm::getFloat(response);
+    boilerStatus->m_boiler2_temperature_read = self->m_results[0].m_float;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -559,7 +600,7 @@ void sns_opentherm_check_retry_request()
 
     bool canRetry = ++cmd->m_flags.retryCount < 3;
     // In case of last retry and if this command never respond successfully, set notSupported flag
-    if (!canRetry && !cmd->m_flags.supported)
+    if (!cmd->m_flags.supported)
     {
         cmd->m_flags.notSupported = true;
         AddLog(LOG_LEVEL_ERROR,

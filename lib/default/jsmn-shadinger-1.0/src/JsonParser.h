@@ -25,9 +25,6 @@
 #include <stdlib.h>
 #include <Arduino.h>
 
-// #define strcmp_P(x, y) strcmp(x,y)
-// #define strcasecmp_P(x,y) strcasecmp(x,y)
-// #define pgm_read_byte(x)  (*(uint8_t*)(x))
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 #endif
@@ -239,7 +236,7 @@ public:
   // test if the parsing was successful
   inline explicit operator bool() const { return _token_len > 0; }
 
-  const JsonParserToken getRoot(void) { return JsonParserToken(&_tokens[0]); }
+  const JsonParserToken getRoot(void) { return (_tokens != nullptr) ? JsonParserToken(&_tokens[0]) : JsonParserToken(&token_bad); }
   // const JsonParserObject getRootObject(void) { return JsonParserObject(&_tokens[0]); }
   const JsonParserObject getRootObject(void) const;
 

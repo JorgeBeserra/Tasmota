@@ -8,55 +8,85 @@
 
 #ifdef ESP32
 /*********************************************************************************************\
- * ESP32, ESP32-S2, ESP32-S3, ESP32-C2, ESP32-C3, ESP32-C6 and ESP32-H2 Support
+ * ESP32, ESP32-C2, ESP32-C3, ESP32-C5, ESP32-C6, ESP32-H2, ESP32-P4, ESP32-S2 and ESP32-S3 Support
 \*********************************************************************************************/
 
-//                                                   11b 11g 11n  11n  11ax
-const static char kWifiPhyMode[] PROGMEM = "low rate|11b|11g|HT20|HT40|HE20"; // Wi-Fi Modes
+//                                                   11b 11g 11a 11n  11n  11ax 11ac
+const static char kWifiPhyMode[] PROGMEM = "low rate|11b|11g|11a|HT20|HT40|HE20|VHT20"; // Wi-Fi Modes
 
 #include "soc/soc.h"
 #include "soc/spi_reg.h"
-// ESP32_ARCH contains the name of the architecture (used by autoconf)
-#if CONFIG_IDF_TARGET_ESP32
-  #ifdef CORE32SOLO1
-    #define ESP32_ARCH            "esp32solo1"
-  #else
-    #define ESP32_ARCH            "esp32"
-  #endif
-#elif CONFIG_IDF_TARGET_ESP32S2
-  #define ESP32_ARCH              "esp32s2"
-#elif CONFIG_IDF_TARGET_ESP32S3
-  #define ESP32_ARCH              "esp32s3"
-#elif CONFIG_IDF_TARGET_ESP32C2
-  #define ESP32_ARCH              "esp32c2"
-#elif CONFIG_IDF_TARGET_ESP32C3
-  #define ESP32_ARCH              "esp32c3"
-#elif CONFIG_IDF_TARGET_ESP32C6
-  #define ESP32_ARCH              "esp32c6"
-#elif CONFIG_IDF_TARGET_ESP32H2
-  #define ESP32_ARCH              "esp32h2"
-#else
-  #define ESP32_ARCH              ""
-#endif
-
 // See libraries\ESP32\examples\ResetReason.ino
 #include "esp_chip_info.h"
-#if CONFIG_IDF_TARGET_ESP32      // ESP32/PICO-D4
+#include <nvs.h>
+
+#include "Esp.h"
+#include "spi_flash_mmap.h"
+#include <memory>
+#include <soc/soc.h>
+#include <soc/efuse_reg.h>
+#include <esp_partition.h>
+extern "C" {
+#include "esp_ota_ops.h"
+#include "esp_image_format.h"
+}
+#include "esp_system.h"
+#include "esp_flash.h"
+
+#include "bootloader_common.h"
+
+// Flash memory mapping - See Esp.cpp
+
+#if CONFIG_IDF_TARGET_ESP32               // ESP32/PICO-D4
   #include "esp32/rom/rtc.h"
-#elif CONFIG_IDF_TARGET_ESP32S2  // ESP32-S2
+  #include "esp32/rom/spi_flash.h"
+  #define ESP_FLASH_IMAGE_BASE 0x1000     // Flash offset containing magic flash size and spi mode
+#elif CONFIG_IDF_TARGET_ESP32S2
   #include "esp32s2/rom/rtc.h"
-#elif CONFIG_IDF_TARGET_ESP32S3  // ESP32-S3
+  #include "esp32s2/rom/spi_flash.h"
+  #define ESP_FLASH_IMAGE_BASE 0x1000     // Flash offset containing magic flash size and spi mode
+#elif CONFIG_IDF_TARGET_ESP32S3
   #include "esp32s3/rom/rtc.h"
-#elif CONFIG_IDF_TARGET_ESP32C2  // ESP32-C2
+  #include "esp32s3/rom/spi_flash.h"
+  #define ESP_FLASH_IMAGE_BASE 0x0000     // Esp32s3 is located at 0x0000
+#elif CONFIG_IDF_TARGET_ESP32C2
   #include "esp32c2/rom/rtc.h"
-#elif CONFIG_IDF_TARGET_ESP32C3  // ESP32-C3
+  #include "esp32c2/rom/spi_flash.h"
+  #define ESP_FLASH_IMAGE_BASE 0x0000     // Esp32c2 is located at 0x0000
+#elif CONFIG_IDF_TARGET_ESP32C3
   #include "esp32c3/rom/rtc.h"
-#elif CONFIG_IDF_TARGET_ESP32C6  // ESP32-C6
+  #include "esp32c3/rom/spi_flash.h"
+  #define ESP_FLASH_IMAGE_BASE 0x0000     // Esp32c3 is located at 0x0000
+#elif CONFIG_IDF_TARGET_ESP32C5
+  #include "esp32c5/rom/rtc.h"
+  #include "esp32c5/rom/spi_flash.h"
+  #define ESP_FLASH_IMAGE_BASE 0x2000     // Esp32c5 is located at 0x2000
+#elif CONFIG_IDF_TARGET_ESP32C6
   #include "esp32c6/rom/rtc.h"
-#elif CONFIG_IDF_TARGET_ESP32H2  // ESP32-H2
+  #include "esp32c6/rom/spi_flash.h"
+  #define ESP_FLASH_IMAGE_BASE 0x0000     // Esp32c6 is located at 0x0000
+#elif CONFIG_IDF_TARGET_ESP32C61
+  #include "esp32c61/rom/rtc.h"
+  #include "esp32c61/rom/spi_flash.h"
+  #define ESP_FLASH_IMAGE_BASE 0x0000     // Esp32c61 is located at 0x0000
+#elif CONFIG_IDF_TARGET_ESP32H2
   #include "esp32h2/rom/rtc.h"
+  #include "esp32h2/rom/spi_flash.h"
+  #define ESP_FLASH_IMAGE_BASE 0x0000     // Esp32h2 is located at 0x0000
+#elif CONFIG_IDF_TARGET_ESP32P4
+  #include "esp32p4/rom/rtc.h"
+  #include "esp32p4/rom/spi_flash.h"
+  #define ESP_FLASH_IMAGE_BASE 0x2000     // Esp32p4 is located at 0x2000
+#elif CONFIG_IDF_TARGET_ESP32S31
+  #include "esp32s31/rom/rtc.h"
+  #include "esp32s31/rom/spi_flash.h"
+  #define ESP_FLASH_IMAGE_BASE 0x2000     // Esp32s31 is located at 0x2000
 #else
   #error Target CONFIG_IDF_TARGET is not supported
+#endif
+
+#ifndef CONFIG_IDF_TARGET_ESP32P4
+#include <esp_phy_init.h>
 #endif
 
 // Set the Stacksize for Arduino core. Default is 8192, some builds may need a bigger one
@@ -64,11 +94,7 @@ size_t getArduinoLoopTaskStackSize(void) {
   return SET_ESP32_STACK_SIZE;
 }
 
-#include <esp_phy_init.h>
-
 // Handle 20k of NVM
-
-#include <nvs.h>
 
 bool NvmExists(const char *sNvsName) {
   nvs_handle_t handle;
@@ -139,9 +165,11 @@ void SettingsErase(uint8_t type) {
       break;
     case 1:               // Reset 3 = SDK parameter area
     case 4:               // WIFI_FORCE_RF_CAL_ERASE = SDK parameter area
+#ifdef SOC_SUPPORTS_WIFI
       r1 = esp_phy_erase_cal_data_in_nvs();
 //      r1 = NvmErase("cal_data");
       AddLog(LOG_LEVEL_DEBUG, PSTR(D_LOG_APPLICATION D_ERASE " PHY data (%d)"), r1);
+#endif //SOC_SUPPORTS_WIFI
       break;
     case 3:               // QPC Reached = QPC, Tasmota and SDK parameter area (0x0F3xxx - 0x0FFFFF)
 //      nvs_flash_erase();  // Erase RTC, PHY, sta.mac, ap.sndchan, ap.mac, Tasmota etc.
@@ -206,51 +234,6 @@ void NvsInfo(void) {
   AddLog(LOG_LEVEL_INFO, PSTR("NVS: Used %d/%d entries, NameSpaces %d"),
     nvs_stats.used_entries, nvs_stats.total_entries, nvs_stats.namespace_count);
 }
-
-//
-// Flash memory mapping
-//
-
-// See Esp.cpp
-#include "Esp.h"
-#include "spi_flash_mmap.h"
-#include <memory>
-#include <soc/soc.h>
-#include <soc/efuse_reg.h>
-#include <esp_partition.h>
-extern "C" {
-#include "esp_ota_ops.h"
-#include "esp_image_format.h"
-}
-#include "esp_system.h"
-#include "esp_flash.h"
-
-#if CONFIG_IDF_TARGET_ESP32       // ESP32/PICO-D4
-  #include "esp32/rom/spi_flash.h"
-  #define ESP_FLASH_IMAGE_BASE 0x1000     // Flash offset containing magic flash size and spi mode
-#elif CONFIG_IDF_TARGET_ESP32S2   // ESP32-S2
-  #include "esp32s2/rom/spi_flash.h"
-  #define ESP_FLASH_IMAGE_BASE 0x1000     // Flash offset containing magic flash size and spi mode
-#elif CONFIG_IDF_TARGET_ESP32S3   // ESP32-S3
-  #include "esp32s3/rom/spi_flash.h"
-  #define ESP_FLASH_IMAGE_BASE 0x0000     // Esp32s3 is located at 0x0000
-#elif CONFIG_IDF_TARGET_ESP32C2   // ESP32-C2
-  #include "esp32c2/rom/spi_flash.h"
-  #define ESP_FLASH_IMAGE_BASE 0x0000     // Esp32c2 is located at 0x0000
-#elif CONFIG_IDF_TARGET_ESP32C3   // ESP32-C3
-  #include "esp32c3/rom/spi_flash.h"
-  #define ESP_FLASH_IMAGE_BASE 0x0000     // Esp32c3 is located at 0x0000
-#elif CONFIG_IDF_TARGET_ESP32C6   // ESP32-C6
-  #include "esp32c6/rom/spi_flash.h"
-  #define ESP_FLASH_IMAGE_BASE 0x0000     // Esp32c6 is located at 0x0000
-#elif CONFIG_IDF_TARGET_ESP32H2   // ESP32-H2
-  #include "esp32h2/rom/spi_flash.h"
-  #define ESP_FLASH_IMAGE_BASE 0x0000     // Esp32h2 is located at 0x0000
-#else
-    #error Target CONFIG_IDF_TARGET is not supported
-#endif
-
-#include "bootloader_common.h"
 
 uint32_t EspProgramSize(const char *label) {
   const esp_partition_t *part = esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, label);
@@ -564,6 +547,14 @@ uint8_t* FlashDirectAccess(void) {
   return data;
 }
 
+uint32_t ESP_getFlashChipSpeed(void) {
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 3, 2)
+  return ESP.getFlashFrequencyMHz() * 1000000;
+#else
+  return ESP.getFlashChipSpeed();  // In Hz
+#endif
+}
+
 uint32_t ESP_getPsramSize(void) {
   return ESP.getPsramSize();
 }
@@ -585,8 +576,10 @@ extern "C" {
 // `psramFound()` can return true even if no PSRAM is actually installed
 // This new version also checks `esp_spiram_is_initialized` to know if the PSRAM is initialized
 bool FoundPSRAM(void) {
-#if CONFIG_IDF_TARGET_ESP32C2 || CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C6 || DISABLE_PSRAMCHECK || CORE32SOLO1
+#if CONFIG_IDF_TARGET_ESP32C2 || CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C5 || CONFIG_IDF_TARGET_ESP32C6 || CONFIG_IDF_TARGET_ESP32C61 || DISABLE_PSRAMCHECK || CORE32SOLO1
   return psramFound();
+#elif CONFIG_IDF_TARGET_ESP32P4
+  return ESP.getPsramSize() > 0;
 #else
   return psramFound() && esp_psram_is_initialized();
 #endif
@@ -700,6 +693,44 @@ float CpuTemperature(void) {
 
 // #include "esp_chip_info.h"
 
+String GetDeviceFeatures(void) {
+  esp_chip_info_t chip_info;
+  esp_chip_info(&chip_info);
+
+  String chip_features = "[";
+  bool first_feature = true;
+  auto appendFeature = [&](const char *name) {
+    if (!first_feature) {
+      chip_features += ",";
+    }
+    first_feature = false;
+    chip_features += "\"";
+    chip_features += name;
+    chip_features += "\"";
+  };
+
+  if (chip_info.features & CHIP_FEATURE_WIFI_BGN) {
+    appendFeature("WIFI_BGN");
+  }
+  if (chip_info.features & CHIP_FEATURE_BLE) {
+    appendFeature("BLE");
+  }
+  if (chip_info.features & CHIP_FEATURE_BT) {
+    appendFeature("BT");
+  }
+  if (chip_info.features & CHIP_FEATURE_EMB_FLASH) {
+    appendFeature("EMB_FLASH");
+  }
+  if (chip_info.features & CHIP_FEATURE_IEEE802154) {
+    appendFeature("IEEE802154");
+  }
+  if (chip_info.features & CHIP_FEATURE_EMB_PSRAM) {
+    appendFeature("EMB_PSRAM");
+  }
+  chip_features += "]";
+  return chip_features;
+}
+
 String GetDeviceHardware(void) {
   // https://www.espressif.com/en/products/socs
 
@@ -712,6 +743,7 @@ typedef enum {
     CHIP_ESP32S3 = 9, //!< ESP32-S3
     CHIP_ESP32C3 = 5, //!< ESP32-C3
     CHIP_ESP32C2 = 12, //!< ESP32-C2
+    CHIP_ESP32C5 = 23, //!< ESP32-C5
     CHIP_ESP32C6 = 13, //!< ESP32-C6
     CHIP_ESP32H2 = 16, //!< ESP32-H2
     CHIP_POSIX_LINUX = 999, //!< The code is running on POSIX/Linux simulator
@@ -874,6 +906,36 @@ typedef struct {
 #endif  // CONFIG_IDF_TARGET_ESP32C2
       return F("ESP32-C2");
     }
+    case 23: {  // ESP32-C5
+      /*
+      ESP32-C5 Series
+      - Ultra-low-power SoC with 32-bit RISC-V single-core microprocessor
+      - 2.4 and 5 GHz dual-band Wi-Fi 6 (802.11ax), Bluetooth® 5 (LE), Zigbee and Thread (802.15.4)
+      - 27 or 19 GPIOs, rich set of peripherals
+      */
+#ifdef CONFIG_IDF_TARGET_ESP32C5
+      switch (pkg_version) {
+        case 0:              return F("ESP32-C5");
+        case 1:              return F("ESP32-C5FH4");
+      }
+#endif  // CONFIG_IDF_TARGET_ESP32C5
+      return F("ESP32-C5");
+    }
+    case 20: {  // ESP32-C61
+      /*
+      ESP32-C61 Series
+      - 32-bit RISC-V single-core processor that operates at up to 160 MHz
+      - 2.4 GHz Wi-Fi 6 (802.11ax) and Bluetooth 5 (LE)
+      - 320 KB SRAM, 256 KB ROM, Quad SPI flash/PSRAM
+      - 30 programmable GPIOs
+      */
+#ifdef CONFIG_IDF_TARGET_ESP32C61
+      switch (pkg_version) {
+        case 0:              return F("ESP32-C61");
+      }
+#endif  // CONFIG_IDF_TARGET_ESP32C61
+      return F("ESP32-C61");
+    }
     case 7:     // ESP32-C6(beta)
     case 13: {  // ESP32-C6
       /*
@@ -903,12 +965,10 @@ typedef struct {
       return F("ESP32-H2");
     }
     case 18: {  // ESP32-P4
-#ifdef CONFIG_IDF_TARGET_ESP32P4
-      switch (pkg_version) {
-        case 0:              return F("ESP32-P4");
-      }
-#endif  // CONFIG_IDF_TARGET_ESP32P4
       return F("ESP32-P4");
+    }
+    case 32: {  // ESP32-S31
+      return F("ESP32-S31");
     }
   }
   return F("ESP32");
@@ -1014,6 +1074,55 @@ void GpioForceHoldRelay(void) {
   }
 }
 #endif
+
+/*********************************************************************************************\
+ * On-chip LDO configuration (ESP32-P4)
+ *
+ * Ldo3 2500 - Set LDO3 to 2500mV, 0 = not used
+ * LDO1 and LDO2 are reserved for flash and PSRAM
+\*********************************************************************************************/
+
+#ifdef SOC_GP_LDO_SUPPORTED
+#include "esp_ldo_regulator.h"
+
+#define LDO_FIRST_CHANNEL  3
+
+void LdoInit(void) {
+  for (uint32_t i = 0; i < nitems(Settings->ldo_mv); i++) {
+    if (!Settings->ldo_mv[i]) { continue; }
+    esp_ldo_channel_config_t ldo_config = {
+      .chan_id = (int)(LDO_FIRST_CHANNEL + i),
+      .voltage_mv = Settings->ldo_mv[i],
+    };
+    esp_ldo_channel_handle_t ldo_handle = nullptr;  // Kept until restart
+    esp_err_t ret = esp_ldo_acquire_channel(&ldo_config, &ldo_handle);
+    if (ESP_OK == ret) {
+      AddLog(LOG_LEVEL_INFO, PSTR("LDO: Ldo%d %dmV"), ldo_config.chan_id, ldo_config.voltage_mv);
+    } else {
+      AddLog(LOG_LEVEL_ERROR, PSTR("LDO: Ldo%d failed (%d)"), ldo_config.chan_id, ret);
+    }
+  }
+}
+
+bool LdoEnabled(uint32_t channel) {
+  return ((channel >= LDO_FIRST_CHANNEL) && (channel < LDO_FIRST_CHANNEL + nitems(Settings->ldo_mv)) &&
+          Settings->ldo_mv[channel - LDO_FIRST_CHANNEL]);
+}
+
+void CmndLdo(void) {
+  if ((XdrvMailbox.index < LDO_FIRST_CHANNEL) || (XdrvMailbox.index >= LDO_FIRST_CHANNEL + nitems(Settings->ldo_mv))) { return; }
+  uint32_t index = XdrvMailbox.index - LDO_FIRST_CHANNEL;
+  uint32_t mv = XdrvMailbox.payload;
+  if ((XdrvMailbox.data_len > 0) &&
+      ((0 == mv) || (3300 == mv) || ((mv >= 500) && (mv <= 2700)))) {  // Off, bypass or LDO range
+    if (mv != Settings->ldo_mv[index]) {
+      Settings->ldo_mv[index] = mv;
+      TasmotaGlobal.restart_flag = 2;
+    }
+  }
+  ResponseCmndIdxNumber(Settings->ldo_mv[index]);
+}
+#endif  // SOC_GP_LDO_SUPPORTED
 
 /********************************************************************************************/
 

@@ -24,7 +24,40 @@
 
 #include <berry.h>
 #include <Wire.h>
-#include <byteswap.h>
+// #include <byteswap.h>
+
+#ifndef __bswap_16
+#ifdef __GNUC__
+# define __bswap_16(x) \
+    (__extension__							      \
+     ({ unsigned short int __bsx = (x);					      \
+        ((((__bsx) >> 8) & 0xff) | (((__bsx) & 0xff) << 8)); }))
+#else
+static INLINE unsigned short int
+__bswap_16 (unsigned short int __bsx)
+{
+  return ((((__bsx) >> 8) & 0xff) | (((__bsx) & 0xff) << 8));
+}
+#endif
+#endif // __bswap_16
+
+/* Swap bytes in 32 bit value.  */
+#ifndef __bswap_32
+#ifdef __GNUC__
+# define __bswap_32(x) \
+    (__extension__							      \
+     ({ unsigned int __bsx = (x);					      \
+        ((((__bsx) & 0xff000000) >> 24) | (((__bsx) & 0x00ff0000) >>  8) |    \
+	 (((__bsx) & 0x0000ff00) <<  8) | (((__bsx) & 0x000000ff) << 24)); }))
+#else
+static INLINE unsigned int
+__bswap_32 (unsigned int __bsx)
+{
+  return ((((__bsx) & 0xff000000) >> 24) | (((__bsx) & 0x00ff0000) >>  8) |
+	  (((__bsx) & 0x0000ff00) <<  8) | (((__bsx) & 0x000000ff) << 24));
+}
+#endif
+#endif // __bswap_32
 
 // read the `bus` attribute and return `Wire` or `Wire1`
 // Can return nullptr reference if the bus is not initialized
@@ -35,13 +68,13 @@ TwoWire & getWire(bvm *vm) {
   be_pop(vm, 1);
   if (1 == bus && TasmotaGlobal.i2c_enabled[0]) {
     return Wire;
-#ifdef USE_I2C_BUS2
+#if MAX_I2C > 1
   } else if (2 == bus && TasmotaGlobal.i2c_enabled[1]) {
     return Wire1;
-#endif  // USE_I2C_BUS2
+#endif  // MAX_I2C
   } else {
     be_raise(vm, "configuration_error", "I2C bus not initiliazedd");
-    return *(TwoWire*)nullptr;
+    __builtin_unreachable();  // be_raise() never returns (longjmp); suppress missing-return warning
   }
 }
 
@@ -166,7 +199,7 @@ extern "C" {
         int32_t value = be_toint(vm, 2);
         myWire.write(value);
       } else if (be_isstring(vm, 2)) {
-        const char * s = be_tostring(vm, 1);
+        const char * s = be_tostring(vm, 2);
         myWire.write((uint8_t*) s, strlen(s));
       } else if ((buf = be_tobytes(vm, 2, &len)) != nullptr) {
         myWire.write((uint8_t*) buf, len);

@@ -37,7 +37,7 @@ typedef struct LVGL_PARAMS {
       uint8_t async_dma : 1;   // force DMA completion before returning, avoid conflict with other devices on same bus. If set you should make sure the display is the only device on the bus
       uint8_t busy_invert : 1;
       uint8_t invert_bw : 1;
-      uint8_t resvd_3 : 1;
+      uint8_t use_psram : 1;   // bit 5 (0x20): prefer PSRAM for LVGL draw buffers (ex: ESP32-P4 DSI), falls back to internal RAM
       uint8_t resvd_4 : 1;
       uint8_t resvd_5 : 1;
     };
@@ -73,7 +73,7 @@ public:
   virtual void Updateframe();
   virtual void dim(uint8_t contrast);   // input has range 0..15
   virtual void dim10(uint8_t contrast, uint16_t contrast_gamma);  // input has range 0..255, second arg has gamma correction for PWM with 10 bits resolution
-  virtual void pushColors(uint16_t *data, uint16_t len, boolean first);
+  virtual void pushColors(uint16_t *data, uint32_t len, boolean first);
   virtual void setAddrWindow(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
   virtual void invertDisplay(boolean i);
   virtual void reverseDisplay(boolean i);

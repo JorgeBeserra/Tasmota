@@ -22,6 +22,7 @@
 
 #include <berry.h>
 #include <LList.h>
+#include <new>
 
 #include "be_mapping.h"
 #include "re1.5.h"
@@ -69,8 +70,12 @@ public:
     if (s == nullptr) { s = ""; }
     size_t s_len = strlen_P(s) + strlen_P(prefix) + strlen_P(suffix);
     if (0 == s_len) { return nullptr; }   // do nothing
-    LList_elt<Log_line> * log_elt = new LList_elt<Log_line>();
-    log_elt->val().allocate(s_len + 1);
+    LList_elt<Log_line> * log_elt = new (std::nothrow) LList_elt<Log_line>();
+    if (log_elt == nullptr) { return nullptr; }
+    if (log_elt->val().allocate(s_len + 1) == nullptr) {
+      delete log_elt;
+      return nullptr;  // Drop the log when its buffer cannot be allocated.
+    }
     snprintf_P(log_elt->val().getBuffer(), s_len+1, PSTR("%s%s%s"), prefix, s, suffix);
     log.addToLast(log_elt);
     return log_elt;
@@ -91,20 +96,10 @@ class BerrySupport {
 public:
   bvm *vm = nullptr;                    // berry vm
   int32_t timeout = 0;                  // Berry heartbeat timeout, preventing code to run for too long. `0` means not enabled
+  int32_t last_gc_tims_ms = -1;         // Record the time taken by the last garbage collection in milliseconds, -1 means not yet collected
+  int32_t last_gc_heap_free = -1;       // Record the free heap size after the last garbage collection, -1 means not yet collected
   bool rules_busy = false;              // are we already processing rules, avoid infinite loop
   bool web_add_handler_done = false;    // did we already sent `web_add_handler` event
-#ifdef USE_BERRY_LEDS_PANEL
-  bool leds_panel_loaded = false; // did we already load Leds Panel
-#endif // USE_BERRY_LEDS_PANEL
-#ifdef USE_BERRY_LVGL_PANEL
-  bool lvgl_panel_loaded = true; // did we already load LVGL Panel, default true, changed to false when LVGL starts
-#endif // USE_BERRY_LVGL_PANEL
-#ifdef USE_BERRY_PARTITION_WIZARD
-  bool partition_wizard_loaded = false; // did we already load Parition_Wizard
-#endif // USE_BERRY_PARTITION_WIZARD
-#ifdef USE_BERRY_GPIOVIEWER
-  bool gpviewer_loaded = false;         // did we already load GPIOViewer
-#endif // USE_BERRY_GPIOVIEWER
   bool autoexec_done = false;           // do we still need to load 'autoexec.be'
   bool repl_active = false;             // is REPL running (activates log recording)
   // output log is stored as a LinkedList of buffers
@@ -115,62 +110,5 @@ BerrySupport berry;
 
 // multi-purpose serial logging
 extern "C" void serial_debug(const char * berry_buf, ...);
-
-
-/*********************************************************************************************\
- * Handle dynamic code from Berry bec files
- *
-\*********************************************************************************************/
-struct BeBECCode_t {
-  const char * display_name;      // display name in Web UI (must be URL encoded)
-  const char * id;                // id in requested URL, also don't load if the global name already exists in Berry
-  const char * url;               // absolute URL to download the bec file
-  const char * redirect;          // relative URI to redirect after loading
-  bool * loaded;
-};
-
-const BeBECCode_t BECCode[] = {
-#ifdef USE_BERRY_LEDS_PANEL
-  {
-    "Leds Panel",
-    "leds_panel",
-    USE_BERRY_LEDS_PANEL_URL,
-    "/?",
-    &berry.leds_panel_loaded
-  },
-#endif // USE_BERRY_LEDS_PANEL
-
-#if defined(USE_BERRY_LVGL_PANEL) && defined(USE_LVGL)
-  {
-    "LVGL Mirroring",
-    "lvgl_panel",
-    USE_BERRY_LVGL_PANEL_URL,
-    "/?",
-    &berry.lvgl_panel_loaded
-  },
-#endif // USE_BERRY_LEDS_PANEL
-
-#ifdef USE_BERRY_PARTITION_WIZARD
-  {
-    "Partition Wizard",
-    "partition_wizard",
-    USE_BERRY_PARTITION_WIZARD_URL,
-    "/part_wiz",
-    &berry.partition_wizard_loaded
-  },
-#endif // USE_BERRY_PARTITION_WIZARD
-
-#ifdef USE_BERRY_GPIOVIEWER
-  {
-    "GPIO Viewer",
-    "gpioviewer",
-    USE_BERRY_GPIOVIEWER_URL,
-    "/mn?",
-    &berry.gpviewer_loaded
-  },
-#endif // USE_BERRY_GPIOVIEWER
-
-};
-
 
 #endif  // USE_BERRY

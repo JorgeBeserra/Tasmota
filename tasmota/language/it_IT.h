@@ -28,10 +28,10 @@
  * Use online command StateText to translate ON, OFF, HOLD and TOGGLE.
  * Use online command Prefix to translate cmnd, stat and tele.
  *
- * Updated until v9.4.0.1 - Last update 12.03.2025
+ * Updated until v9.4.0.1 - Last update 11.10.2026
 \*********************************************************************/
 
-#define LANGUAGE_MODULE_NAME         // Enable to display "Module Generic" (ie Spanish), Disable to display "Generic Module" (ie English)
+#define LANGUAGE_MODULE_NAME         // Enable to display 'Module Generic' (ie Spanish), Disable to display 'Generic Module' (ie English)
 // https://www.science.co.il/language/Locale-codes.php
 #define LANGUAGE_LCID 1040
 // HTML (ISO 639-1) Language Code
@@ -52,6 +52,7 @@
 
 // Common
 #define D_ABSOLUTE_HUMIDITY    "Umidità ass"
+#define D_ADDRESS              "Indirizzo"
 #define D_ADMIN                "Admin"
 #define D_AIR_QUALITY          "Qualità dell'aria"
 #define D_AP                   "AP"                   // Access Point
@@ -59,11 +60,13 @@
 #define D_AT                   "in"
 #define D_AUTO                 "AUTO"
 #define D_AUTO_UPDATE          "Aggiornamento automatico"
-#define D_BATTERY              "Batteria"
+#define D_AUTOMATIC            "Automatico"
 #define D_BATT                 "Batt"                 // Short for Battery
+#define D_BATTERY              "Batteria"
 #define D_BATTERY_CHARGE       "Carica"               // Battery charge in %
 #define D_BLINK                "Lampeggia"
 #define D_BLINKOFF             "Lampeggia OFF"
+#define D_BOOST                "Boost"
 #define D_BOOT_COUNT           "Numero boot"
 #define D_BRIGHTLIGHT          "Luminoso"
 #define D_BSSID                "BSSId"
@@ -72,22 +75,24 @@
 #define D_BYTES                "Byte"
 #define D_CELSIUS              "Celsius"
 #define D_CHANNEL              "Canale"
+#define D_CHILD_LOCK           "Blocco bambini"
 #define D_CO2                  "CO2"
 #define D_CODE                 "codice"              // Button code
 #define D_COLDLIGHT            "Fredda"
+#define D_COLOR                "Colore"
 #define D_COMMAND              "Comando"
 #define D_CONNECTED            "Connesso"
 #define D_CORS_DOMAIN          "Dominio CORS"
-#define D_COLOR                "Colore"
 #define D_COUNT                "Conteggio"
 #define D_COUNTER              "Contatore"
 #define D_CT_POWER             "Alimentazione CT"
 #define D_CURRENT              "Corrente"            // As in Voltage and Current
 #define D_CURRENT_NEUTRAL      "Corrente neutrale"
-#define D_DATA                 "Dati"
 #define D_DARKLIGHT            "Scuro"
+#define D_DATA                 "Dati"
 #define D_DEBUG                "Debug"
-#define D_DEWPOINT             "Punto rugiada" //
+#define D_DECRYPTION           "Decriptazione"
+#define D_DEWPOINT             "Punto rugiada"
 #define D_DISABLED             "Disabilitato/a"
 #define D_DISCONNECTED         "Disconnesso"
 #define D_DISTANCE             "Distanza"
@@ -104,23 +109,23 @@
 #define D_FAHRENHEIT           "Fahrenheit"
 #define D_FAILED               "Fallito"
 #define D_FALLBACK             "Riserva"
-#define D_FALLBACK_TOPIC       "Topic Riserva"
+#define D_FALLBACK_TOPIC       "Topic fallback"
 #define D_FALSE                "Falso"
 #define D_FILE                 "File"
 #define D_FILE_SYSTEM_SIZE     "Dimensione file system"
 #define D_FLOW_RATE            "Flusso dati"
-#define D_FRAGMENTATION        "framm."      // Lower case abbreviated version of fragmentation used in "memory fragmentation"
+#define D_FRAGMENTATION        "framm."      // Lower case abbreviated version of fragmentation used in 'memory fragmentation'
 #define D_FRAME_RATE           "Frequenza fotogrammi"
 #define D_FREE_MEMORY          "Memoria libera"
-#define D_PSR_MAX_MEMORY       "PS-RAM - Memoria"
-#define D_PSR_FREE_MEMORY      "PS-RAM - Memoria libera"
 #define D_FREQUENCY            "Frequenza"
 #define D_GAS                  "Gas"
 #define D_GATEWAY              "Gateway"
 #define D_GROUP                "Gruppo"
-#define D_HOST                 "Host"
 #define D_HALL_EFFECT          "Effetto hall"
+#define D_HCHO                 "Formaldeide"
 #define D_HEATINDEX            "Indice calore"
+#define D_HOLIDAY              "Vacanza"
+#define D_HOST                 "Host"
 #define D_HOSTNAME             "Nome host"
 #define D_HUMIDITY             "Umidità"
 #define D_ILLUMINANCE          "Illuminazione"
@@ -131,12 +136,16 @@
 #define D_INITIALIZED          "Inizializzato"
 #define D_IP_ADDRESS           "Indirizzo IP"
 #define D_LIGHT                "Luce"
-#define D_LWT                  "LWT"
+#define D_LOW                  "Basso"
 #define D_LQI                  "LQI"                  // Zigbee Link Quality Index
+#define D_LWT                  "LWT"
+#define D_MANUAL               "Manuale"
 #define D_MODULE               "Modulo"
 #define D_MOISTURE             "Umidità"
+#define D_MQ                   "MQ"
 #define D_MQTT                 "MQTT"
 #define D_MULTI_PRESS          "multi-pressione"
+#define D_NA                   "N/D"
 #define D_NOISE                "Rumore"
 #define D_NONE                 "Nessuno"
 #define D_NOX                  "NOx"
@@ -147,10 +156,9 @@
 #define D_ON                   "ON"
 #define D_ONLINE               "Online"
 #define D_ORP                  "ORP"
+#define D_PARTITION            "Partizione"      // As in flash and firmware partition
 #define D_PASSWORD             "Password"
 #define D_PH                   "pH"
-#define D_MQ                   "MQ"
-#define D_PARTITION            "Partizione"      // As in flash and firmware partition
 #define D_PORT                 "Porta"
 #define D_POWER_FACTOR         "Fattore di potenza"
 #define D_POWERUSAGE           "Potenza"
@@ -163,27 +171,31 @@
 #define D_PROGRAM_FLASH_SIZE   "Dimensione flash"
 #define D_PROGRAM_SIZE         "Dimensione programma"
 #define D_PROJECT              "Progetto"
+#define D_PSR_FREE_MEMORY      "PS-RAM - Memoria libera"
+#define D_PSR_MAX_MEMORY       "PS-RAM - Memoria"
 #define D_RAIN                 "Pioggia"
 #define D_RANGE                "Intervallo"
 #define D_RECEIVED             "Ricevuto"
 #define D_RESTART              "Riavvia"
-#define D_RESTARTING           "Riavvio"
 #define D_RESTART_REASON       "Causa riavvio"
+#define D_RESTARTING           "Riavvio"
 #define D_RETAINED             "salvato"
 #define D_RULE                 "Regola"
 #define D_SAVE                 "Salva"
 #define D_SENSOR               "Sensore"
+#define D_SOC                  "Stato di carica"
+#define D_SOH                  "State di salute"
 #define D_SSID                 "SSID"
 #define D_START                "Esegui"
 #define D_STD_TIME             "STD"
 #define D_STOP                 "Stop"
 #define D_SUBNET_MASK          "Maschera sottorete"
 #define D_SUBSCRIBE_TO         "Abbonati a"
-#define D_UNSUBSCRIBE_FROM     "Rimuovi abbonamento da"
 #define D_SUCCESSFUL           "Completato"
 #define D_SUNRISE              "Alba"
 #define D_SUNSET               "Tramonto"
 #define D_TEMPERATURE          "Temperatura"
+#define D_TIME_OF_DAY                 "Ora"
 #define D_TO                   "a"
 #define D_TOGGLE               "ON/OFF"
 #define D_TOPIC                "Topic"
@@ -194,6 +206,7 @@
 #define D_TWILIGHT_ASTRONOMICAL "astronomico"
 #define D_TWILIGHT_CIVIL       "civile"
 #define D_TWILIGHT_NAUTICAL    "nautico"
+#define D_UNSUBSCRIBE_FROM     "Rimuovi abbonamento da"
 #define D_UPLOAD               "Caricamento"
 #define D_UPTIME               "Tempo accensione"
 #define D_USED                 "usati"
@@ -213,12 +226,11 @@
 #define D_VOC                  "VOC"
 #define D_VOLTAGE              "Tensione"
 #define D_VOLUME               "Volume"
-#define D_WEIGHT               "Peso"
 #define D_WARMLIGHT            "Calda"
-#define D_WEB_SERVER           "Server web"
-#define D_SOC                  "Stato di carica"
-#define D_SOH                  "State di salute"
 #define D_WATER_DEPTH          "Profondità dell'acqua"
+#define D_WEB_SERVER           "Server web"
+#define D_WEIGHT               "Peso"
+#define D_WINDOW_OPEN          "Apertura finestra"
 
 // tasmota.ino
 #define D_WARNING_MINIMAL_VERSION  "ATTENZIONE Questa versione non supporta il salvataggio delle impostazioni"
@@ -346,6 +358,7 @@
 
 #define D_OTHER_PARAMETERS    "Altri parametri"
 #define D_TEMPLATE            "Modello"
+#define D_TEMPLATE_WRONG_ARCH "Ripristina tipo chip corretto"
 #define D_ACTIVATE            "Attiva"
 #define D_DEVICE_NAME         "Nome dispositivo"
 #define D_WEB_ADMIN_PASSWORD  "Password amministratore web"
@@ -372,6 +385,7 @@
 #define D_PROGRAM_VERSION       "Versione programma"
 #define D_BUILD_DATE_AND_TIME   "Data/ora compilazione"
 #define D_CORE_AND_SDK_VERSION  "Versione core/SDK"
+#define D_HOSTED_MCU            "MCU hostato"
 #define D_FLASH_WRITE_COUNT     "Numero scritture flash"
 #define D_MAC_ADDRESS           "Indirizzo MAC"
 #define D_MQTT_HOST             "Host MQTT"
@@ -452,6 +466,8 @@
 #define D_DOMOTICZ_IDX              "Idx"
 #define D_DOMOTICZ_KEY_IDX          "Idx - chiave"
 #define D_DOMOTICZ_SWITCH_IDX       "Idx - switch"
+#define D_DOMOTICZ_KEY              "Chiave"
+#define D_DOMOTICZ_SWITCH           "Switch"
 #define D_DOMOTICZ_SENSOR_IDX       "Idx - sensore"
 #define D_DOMOTICZ_TEMP             "Temp"
 #define D_DOMOTICZ_TEMP_HUM         "Temp,Umd"
@@ -470,7 +486,6 @@
 #define D_TIMER_PARAMETERS  "Parametri timer"
 #define D_TIMER_ENABLE      "Abilita timer"
 #define D_TIMER_ARM         "Abilita"
-#define D_TIMER_TIME        "Ora"
 #define D_TIMER_DAYS        "Giorni"
 #define D_TIMER_REPEAT      "Ripeti"
 #define D_TIMER_OUTPUT      "Uscita"
@@ -538,6 +553,10 @@
 #define D_ENERGY_YESTERDAY                "Energia - ieri"
 #define D_ENERGY_TOTAL                    "Energia - totale"
 
+// xdrv_92_vid6608.ino
+#define D_VID6608_F "VID6608 F"
+#define D_VID6608_CW "VID6608 CW"
+
 // xsns_100_ina3221.ino
 #define  D_UNIT_CHARGE                    "Ah"
 #define  D_CHARGE                         "Carica"
@@ -564,13 +583,13 @@
 #define D_THERMOSTAT_DUTY_CYCLE       "Ciclo lavoro"
 #define D_THERMOSTAT_VALVE_POSITION   "Posizione valvola"
 #define D_THERMOSTAT_CYCLE_TIME       "Tempo ciclo"
-#define D_THERMOSTAT_PI_AUTOTUNE      "Regolazione automatica  PI"
+#define D_THERMOSTAT_PI_AUTOTUNE      "Regolazione automatica PI"
 #define D_THERMOSTAT_CONTROL_METHOD   "Metodo controllo"
 #define D_THERMOSTAT_RAMP_UP          "Rampa"
 #define D_THERMOSTAT_PI               "PI"
 #define D_THERMOSTAT_AUTOTUNE         "Regolazione automatica"
 #define D_THERMOSTAT_RAMP_UP_HYBRID   "Rampa (ibrida)"
-#define D_THERMOSTAT_PI_HYBRID        "PI (ibdrida)"
+#define D_THERMOSTAT_PI_HYBRID        "PI (ibrida)"
 #define D_THERMOSTAT_AUTOTUNE_HYBRID  "Regolazione automatica (ibrida)"
 
 // xdrv_79_esp32_ble.ino
@@ -689,7 +708,7 @@
 #define D_SAT_FIX_2D           "2D"
 #define D_SAT_FIX_3D           "3D"
 #define D_SAT_FIX_GPS_DEAD     "GPS e navigazione stimata"
-#define D_SAT_FIX_TIME         "Solo corrzione orario"
+#define D_SAT_FIX_TIME         "Solo correzione orario"
 
 // tasmota_template.h - keep them as short as possible to be able to fit them in GUI drop down box
 #define D_SENSOR_NONE                   "Nessuno"
@@ -717,13 +736,13 @@
 #define D_SENSOR_DFR562                 "Riproduttore MP3"
 #define D_SENSOR_DFR562_BUSY            "MP3 occupato"
 #define D_SENSOR_IRSEND                 "IR - TX"
-#define D_SENSOR_SWITCH                 "Switch"          // Suffix "1"
-#define D_SENSOR_BUTTON                 "Pulsante"        // Suffix "1"
-#define D_SENSOR_RELAY                  "Relè"            // Suffix "1i"
-#define D_SENSOR_LED                    "Led"             // Suffix "1i"
-#define D_SENSOR_LED_LINK               "Led - Lampeggio" // Suffix "i"
-#define D_SENSOR_PWM                    "PWM"             // Suffix "1"
-#define D_SENSOR_COUNTER                "Contatore"       // Suffix "1"
+#define D_SENSOR_SWITCH                 "Switch"          // Suffix '1'
+#define D_SENSOR_BUTTON                 "Pulsante"        // Suffix '1'
+#define D_SENSOR_RELAY                  "Relè"            // Suffix '1i'
+#define D_SENSOR_LED                    "Led"             // Suffix '1i'
+#define D_SENSOR_LED_LINK               "Led - Lampeggio" // Suffix 'i'
+#define D_SENSOR_PWM                    "PWM"             // Suffix '1'
+#define D_SENSOR_COUNTER                "Contatore"       // Suffix '1'
 #define D_SENSOR_INTERRUPT              "Interrupt"
 #define D_SENSOR_INPUT                  "Ingresso"
 #define D_SENSOR_IRRECV                 "IR - RX"
@@ -751,6 +770,13 @@
 #define D_SENSOR_SDIO_D1                "SDIO - D1"
 #define D_SENSOR_SDIO_D2                "SDIO - D2"
 #define D_SENSOR_SDIO_D3                "SDIO - D3"
+#define D_SENSOR_HSDIO_CMD              "HSDIO - CMD"
+#define D_SENSOR_HSDIO_CLK              "HSDIO - CLK"
+#define D_SENSOR_HSDIO_RST              "HSDIO - RST"
+#define D_SENSOR_HSDIO_D0               "HSDIO - D0"
+#define D_SENSOR_HSDIO_D1               "HSDIO - D1"
+#define D_SENSOR_HSDIO_D2               "HSDIO - D2"
+#define D_SENSOR_HSDIO_D3               "HSDIO - D3"
 #define D_SENSOR_BACKLIGHT              "Retroilluminazione"
 #define D_SENSOR_PMS5003_TX             "PMS5003 - TX"
 #define D_SENSOR_PMS5003_RX             "PMS5003 - RX"
@@ -830,8 +856,8 @@
 #define D_GPIO_LORA_CS                  "LoRa - CS"
 #define D_GPIO_LORA_RST                 "LoRa - Rst"
 #define D_GPIO_LORA_BUSY                "LoRa - Busy"
-#define D_GPIO_LORA_DI                  "LoRa - DIO"    // Suffix "0","1","2"
-#define D_SENSOR_NRG_SEL                "HLWBL - SEL"     // Suffix "i"
+#define D_GPIO_LORA_DI                  "LoRa - DIO"      // Suffix '0','1','2'
+#define D_SENSOR_NRG_SEL                "HLWBL - SEL"     // Suffix 'i'
 #define D_SENSOR_NRG_CF1                "HLWBL - CF1"
 #define D_SENSOR_HLW_CF                 "HLW8012 - CF"
 #define D_SENSOR_HJL_CF                 "BL0937 - CF"
@@ -859,7 +885,7 @@
 #define D_SENSOR_ARIRFSEL               "IR ALux - SEL"
 #define D_SENSOR_TXD                    "Seriale - TX"
 #define D_SENSOR_RXD                    "Seriale - RX"
-#define D_SENSOR_ROTARY                 "Rotativo"       // Suffix "1A"
+#define D_SENSOR_ROTARY                 "Rotativo"       // Suffix '1A'
 #define D_SENSOR_HRE_CLOCK              "HRE - Clock"
 #define D_SENSOR_HRE_DATA               "HRE - Dati"
 #define D_SENSOR_ADE7880_IRQ            "ADE7880 - IRQ"
@@ -955,6 +981,9 @@
 #define D_SENSOR_IEM3000_RX             "iEM3000 - RX"
 #define D_SENSOR_MIEL_HVAC_TX           "MiEl HVAC - TX"
 #define D_SENSOR_MIEL_HVAC_RX           "MiEl HVAC - RX"
+#define D_SENSOR_MIEL_HVAC_MB_TX        "MiEl HVAC MB - TX"
+#define D_SENSOR_MIEL_HVAC_MB_RX        "MiEl HVAC MB - RX"
+#define D_SENSOR_MIEL_HVAC_MB_TXEN      "MiEl HVAC MB - DE"
 #define D_SENSOR_PROJECTOR_CTRL_TX      "DLP - Tx"
 #define D_SENSOR_PROJECTOR_CTRL_RX      "DLP - Rx"
 #define D_SENSOR_SHELLY_DIMMER_BOOT0    "SHD - Boot 0"
@@ -1027,6 +1056,8 @@
 #define D_SENSOR_WOOLIIS_RX             "Wooliis - RX"
 #define D_SENSOR_C8_CO2_5K_RX           "C8-CO2-5K - RX"
 #define D_SENSOR_C8_CO2_5K_TX           "C8-CO2-5K - TX"
+#define D_SENSOR_MKSKYBLU_TX            "MkSkyBlu - TX"
+#define D_SENSOR_MKSKYBLU_RX            "MkSkyBlu - RX"
 
 // Units
 #define D_UNIT_AMPERE                     "A"
@@ -1045,7 +1076,7 @@
 #define D_UNIT_KELVIN                     "K"
 #define D_UNIT_KILOMETER                  "km"
 #define D_UNIT_KILOGRAM                   "kg"
-#define D_UNIT_KILOMETER_PER_HOUR         "km/h"  // or "km/h"
+#define D_UNIT_KILOMETER_PER_HOUR         "km/h"  // or 'km/h'
 #define D_UNIT_KILOOHM                    "kΩ"
 #define D_UNIT_KILOWATTHOUR               "kWh"
 #define D_UNIT_LITERS                     "L"
@@ -1202,7 +1233,7 @@
 #define D_FP_PACKETRECIEVEERR        "Errore comunicazione"           // 0x01 Error when receiving data package
 #define D_FP_NOFINGER                ""                               // 0x02 No finger on the sensor
 #define D_FP_IMAGEFAIL               "Errore immagine"                // 0x03 Failed to enroll the finger
-#define D_FP_IMAGEMESS               "Immmagine troppo danneggiata"   // 0x06 Failed to generate character file due to overly disorderly fingerprint image
+#define D_FP_IMAGEMESS               "Immagine troppo danneggiata"    // 0x06 Failed to generate character file due to overly disorderly fingerprint image
 #define D_FP_FEATUREFAIL             "Impronta troppo piccola"        // 0x07 Failed to generate character file due to the lack of character point or small fingerprint image
 #define D_FP_NOMATCH                 "Nessuna corrispondenza"         // 0x08 Finger doesn't match
 #define D_FP_NOTFOUND                "Corrispondenza non trovata"     // 0x09 Failed to find matching finger
@@ -1322,5 +1353,16 @@
 // xnrg_25_v9240.ino
 #define D_SENSOR_V9240_TX "V9240 - TX"
 #define D_SENSOR_V9240_RX "V9240 - RX"
+
+#define D_SENSOR_MBS_RX_ENA    "ModBr - RX ON"
+
+// xdrv_94_modbus_relay.ino
+#define D_MODBUSRELAY_TX         "MbsRelay - TX"
+#define D_MODBUSRELAY_TX_ENA     "MbsRelay - Abil. TX"
+#define D_MODBUSRELAY_RX         "MbsRelay - RX"
+#define D_MODBUSRELAY_RX_ENA     "MbsRelay - Abil. RX"
+
+// xdrv_89_esp32_shelly_emulation.ino
+#define D_SHELLY                 "Shelly"
 
 #endif  // _LANGUAGE_IT_IT_H_

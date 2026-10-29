@@ -14,6 +14,19 @@
 #include <cmath>
 #endif
 #include "IRtimer.h"
+#if defined(ESP32) && !defined(UNIT_TEST)
+// On ESP32 the carrier is made in software (see mark()). Run that loop from
+// IRAM, switch the pin by register and wait with the ROM delay, so the carrier
+// no longer depends on flash cache timing and on where the code lands in flash.
+// Measured on an ESP32-D0WD-V3 @ 160 MHz with digitalWrite(), delayMicroseconds()
+// and the code in flash: 35 kHz instead of 38 kHz, 28.7 kHz in a larger build.
+#include "esp_attr.h"
+#include "esp_rom_sys.h"
+#include "hal/gpio_ll.h"
+#define IRSEND_IRAM IRAM_ATTR
+#else
+#define IRSEND_IRAM
+#endif
 
 /// Constructor for an IRsend object.
 /// @param[in] IRsendPin Which GPIO pin to use when sending an IR command.
@@ -50,15 +63,19 @@ void IRsend::begin() {
 }
 
 /// Turn off the IR LED.
-void IRsend::ledOff() {
-#ifndef UNIT_TEST
+void IRSEND_IRAM IRsend::ledOff() {
+#if defined(ESP32) && !defined(UNIT_TEST)
+  gpio_ll_set_level(&GPIO, IRpin, outputOff);
+#elif !defined(UNIT_TEST)
   digitalWrite(IRpin, outputOff);
 #endif
 }
 
 /// Turn on the IR LED.
-void IRsend::ledOn() {
-#ifndef UNIT_TEST
+void IRSEND_IRAM IRsend::ledOn() {
+#if defined(ESP32) && !defined(UNIT_TEST)
+  gpio_ll_set_level(&GPIO, IRpin, outputOn);
+#elif !defined(UNIT_TEST)
   digitalWrite(IRpin, outputOn);
 #endif
 }
@@ -74,9 +91,9 @@ uint32_t IRsend::calcUSecPeriod(uint32_t hz, bool use_offset) {
       (1000000UL + hz / 2) / hz;  // The equiv of round(1000000/hz).
   // Apply the offset and ensure we don't result in a <= 0 value.
   if (use_offset)
-    return std::max((uint32_t)1, period + periodOffset);
+    return std::max(static_cast<uint32_t>(1), period + periodOffset);
   else
-    return std::max((uint32_t)1, period);
+    return std::max(static_cast<uint32_t>(1), period);
 }
 
 /// Set the output frequency modulation and duty cycle.
@@ -111,11 +128,13 @@ void IRsend::enableIROut(uint32_t freq, uint8_t duty) {
 #if ALLOW_DELAY_CALLS
 /// An ESP8266 RTOS watch-dog timer friendly version of delayMicroseconds().
 /// @param[in] usec Nr. of uSeconds to delay for.
-void IRsend::_delayMicroseconds(uint32_t usec) {
+void IRSEND_IRAM IRsend::_delayMicroseconds(uint32_t usec) {
   // delayMicroseconds() is only accurate to 16383us.
   // Ref: https://www.arduino.cc/en/Reference/delayMicroseconds
   if (usec <= kMaxAccurateUsecDelay) {
-#ifndef UNIT_TEST
+#if defined(ESP32) && !defined(UNIT_TEST)
+    esp_rom_delay_us(usec);
+#elif !defined(UNIT_TEST)
     delayMicroseconds(usec);
 #endif
   } else {
@@ -154,7 +173,7 @@ void IRsend::_delayMicroseconds(uint32_t usec) {
 ///   Hence, for greater compatibility & choice, we don't use that method.
 /// Ref:
 ///   https://www.analysir.com/blog/2017/01/29/updated-esp8266-nodemcu-backdoor-upwm-hack-for-ir-signals/
-uint16_t IRsend::mark(uint16_t usec) {
+uint16_t IRSEND_IRAM IRsend::mark(uint16_t usec) {
   // Handle the simple case of no required frequency modulation.
   if (!modulation || _dutycycle >= 100) {
     ledOn();
@@ -174,14 +193,16 @@ uint16_t IRsend::mark(uint16_t usec) {
     ledOn();
     // Calculate how long we should pulse on for.
     // e.g. Are we to close to the end of our requested mark time (usec)?
-    _delayMicroseconds(std::min((uint32_t)onTimePeriod, usec - elapsed));
+    _delayMicroseconds(std::min(static_cast<uint32_t>(onTimePeriod),
+                                usec - elapsed));
     ledOff();
     counter++;
     if (elapsed + onTimePeriod >= usec)
       return counter;  // LED is now off & we've passed our allotted time.
     // Wait for the lesser of the rest of the duty cycle, or the time remaining.
     _delayMicroseconds(
-        std::min(usec - elapsed - onTimePeriod, (uint32_t)offTimePeriod));
+        std::min(usec - elapsed - onTimePeriod,
+                 static_cast<uint32_t>(offTimePeriod)));
     elapsed = usecTimer.elapsed();  // Update & recache the actual elapsed time.
   }
   return counter;
@@ -191,7 +212,7 @@ uint16_t IRsend::mark(uint16_t usec) {
 /// Sends an IR space for the specified number of microseconds.
 /// A space is no output, so the PWM output is disabled.
 /// @param[in] time Time in microseconds (us).
-void IRsend::space(uint32_t time) {
+void IRSEND_IRAM IRsend::space(uint32_t time) {
   ledOff();
   if (time == 0) return;
   _delayMicroseconds(time);
@@ -214,7 +235,7 @@ int8_t IRsend::calibrate(uint16_t hz) {
   uint32_t timeTaken = usecTimer.elapsed();  // Record the time it took.
   // While it shouldn't be necessary, assume at least 1 pulse, to avoid a
   // divide by 0 situation.
-  pulses = std::max(pulses, (uint16_t)1U);
+  pulses = std::max(pulses, static_cast<uint16_t>(1U));
   uint32_t calcPeriod = calcUSecPeriod(hz);  // e.g. @38kHz it should be 26us.
   // Assuming 38kHz for the example calculations:
   // In a 65535us pulse, we should have 2520.5769 pulses @ 26us periods.
@@ -227,10 +248,19 @@ int8_t IRsend::calibrate(uint16_t hz) {
   // Calculate the actual period from the actual time & the actual pulses
   // generated.
   double_t actualPeriod = (double_t)timeTaken / (double_t)pulses;
-  // Store the difference between the actual time per period vs. calculated.
-  periodOffset = (int8_t)((double_t)calcPeriod - actualPeriod);
+  // Store the difference between the actual time per period vs. calculated,
+  // rounded to the nearest microsecond. Truncating towards zero left the
+  // carrier at 37 kHz on an ESP32 where the best offset is about -1.7 us.
+  double_t diff = (double_t)calcPeriod - actualPeriod;
+  periodOffset = (int8_t)(diff < 0 ? diff - 0.5 : diff + 0.5);
   return periodOffset;
 }
+
+/// Set the period offset (in uSeconds) used for the software carrier.
+/// @param[in] offset The offset, e.g. the result of an earlier calibrate().
+/// @note Lets several IRsend objects share one calibration. It takes effect
+///  with the next enableIROut(), which every send method calls.
+void IRsend::setPeriodOffset(int8_t offset) { periodOffset = offset; }
 
 /// Generic method for sending data that is common to most protocols.
 /// Will send leading or trailing 0's if the nbits is larger than the number
@@ -719,6 +749,8 @@ uint16_t IRsend::defaultBits(const decode_type_t protocol) {
       return kDaikin64Bits;
     case ELECTRA_AC:
       return kElectraAcBits;
+    case EUROM:
+      return kEuromBits;
     case GREE:
       return kGreeBits;
     case HAIER_AC:
@@ -798,6 +830,8 @@ uint16_t IRsend::defaultBits(const decode_type_t protocol) {
       return kXmpBits;
     case YORK:
       return kYorkBits;
+    case BLUESTARHEAVY:
+      return kBluestarHeavyBits;
     // No default amount of bits.
     case FUJITSU_AC:
     case MWM:
@@ -1241,6 +1275,11 @@ bool IRsend::send(const decode_type_t type, const uint8_t *state,
       sendElectraAC(state, nbytes);
       break;
 #endif  // SEND_ELECTRA_AC
+#if SEND_EUROM
+    case EUROM:
+      sendEurom(state, nbytes);
+      break;
+#endif  // SEND_EUROM
 #if SEND_FUJITSU_AC
     case FUJITSU_AC:
       sendFujitsuAC(state, nbytes);
@@ -1434,6 +1473,11 @@ bool IRsend::send(const decode_type_t type, const uint8_t *state,
       sendYork(state, nbytes);
       break;
 #endif  // SEND_YORK
+#if SEND_BLUESTARHEAVY
+    case BLUESTARHEAVY:
+      sendBluestarHeavy(state, nbytes);
+      break;
+#endif  // SEND_BLUESTARHEAVY
     default:
       return false;
   }

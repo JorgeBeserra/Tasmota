@@ -1104,7 +1104,7 @@ bool XsnsCallNextJsonAppend(void) {
       return false;
     }
   } while (!XsnsEnabled(0, xsns_index));
-  xsns_func_ptr[xsns_index](FUNC_JSON_APPEND);
+  HEAP_MAP_CALL("xsns", pgm_read_byte(kXsnsList + xsns_index), FUNC_JSON_APPEND, xsns_func_ptr[xsns_index](FUNC_JSON_APPEND));
   return true;
 }
 
@@ -1117,6 +1117,14 @@ bool XsnsCall(uint32_t function) {
   uint32_t profile_driver_start = millis();
 #endif  // USE_PROFILE_FUNCTION
 
+#ifdef DEBUG_COMMAND_HANG
+  char tstchr[10];
+  if (FUNC_COMMAND == function) { 
+    sprintf(tstchr, "SNS: ");
+    TasConsole.printf(tstchr);
+  }
+#endif  // DEBUG_COMMAND_HANG
+
   for (uint32_t x = 0; x < xsns_present; x++) {
     if (XsnsEnabled(0, x)) {  // Skip disabled sensor
       if ((FUNC_WEB_SENSOR == function) && !XsnsEnabled(1, x)) { continue; }  // Skip web info for disabled sensors
@@ -1125,7 +1133,19 @@ bool XsnsCall(uint32_t function) {
       uint32_t profile_function_start = millis();
 #endif  // USE_PROFILE_FUNCTION
 
-      result = xsns_func_ptr[x](function);
+#ifdef DEBUG_COMMAND_HANG
+      if (FUNC_COMMAND == function) { 
+#ifdef XFUNC_PTR_IN_ROM
+        uint32_t sensorid = pgm_read_byte(kXsnsList + x);
+#else
+        uint32_t sensorid = kXsnsList[x];
+#endif
+        sprintf(tstchr, "%d,", sensorid);
+        TasConsole.printf(tstchr);
+      }
+#endif  // DEBUG_COMMAND_HANG
+
+      result = HEAP_MAP_CALL("xsns", pgm_read_byte(kXsnsList + x), function, xsns_func_ptr[x](function));
 
 #ifdef USE_WEBSERVER
       if (FUNC_WEB_SENSOR == function) { WSContentSeparator(1); }  // Show separator if needed
@@ -1146,6 +1166,12 @@ bool XsnsCall(uint32_t function) {
 
     }
   }
+
+#ifdef DEBUG_COMMAND_HANG
+  if (FUNC_COMMAND == function) { 
+    TasConsole.println();
+  }
+#endif  // DEBUG_COMMAND_HANG
 
   PROFILE_DRIVER("sns", function, profile_driver_start);
 

@@ -389,6 +389,7 @@ void SetAllPower(uint32_t state, uint32_t source) {
     publish_power = false;
   }
   if (((state >= POWER_OFF) && (state <= POWER_TOGGLE)) || (POWER_OFF_FORCE == state))  {
+    power_t current_power = TasmotaGlobal.power;
     power_t all_on = POWER_MASK >> (POWER_SIZE - TasmotaGlobal.devices_present);
     switch (state) {
     case POWER_OFF:
@@ -408,6 +409,13 @@ void SetAllPower(uint32_t state, uint32_t source) {
       TasmotaGlobal.power = 0; 
       break;
     }
+#ifdef USE_SONOFF_IFAN
+    if (IsModuleIfan()) {
+      // Do not touch Fan relays
+      TasmotaGlobal.power &= 0x0001;
+      TasmotaGlobal.power |= (current_power & 0xFFFE);
+    }
+#endif  // USE_SONOFF_IFAN
     SetDevicePower(TasmotaGlobal.power, source);
   }
   if (publish_power) {
@@ -608,10 +616,9 @@ void SetPulseTimer(uint32_t index, uint32_t time)
 
 uint32_t GetPulseTimer(uint32_t index)
 {
-  long time = TimePassedSince(TasmotaGlobal.pulse_timer[index]);
-  if (time < 0) {
-    time *= -1;
-    return (time > 11100) ? (time / 1000) + 100 : (time > 0) ? time / 100 : 0;
+  int32_t time = -TimePassedSince(TasmotaGlobal.pulse_timer[index]);
+  if (TasmotaGlobal.pulse_timer[index] && time > 0) {
+      return (time > 11100) ? (time / 1000) + 100 : time / 100;
   }
   return 0;
 }
@@ -898,6 +905,15 @@ void MqttShowState(void)
     ResponseAppend_P(PSTR(","));
     MqttShowPWMState();
   }
+  
+  char *hostname = TasmotaGlobal.hostname;
+  uint32_t ipaddress = 0;
+#if defined(ESP32) && defined(USE_ETHERNET)
+  if (static_cast<uint32_t>(EthernetLocalIP()) != 0) {
+    hostname = EthernetHostname();           // Set ethernet as IP connection
+    ipaddress = (uint32_t)EthernetLocalIP();
+  }
+#endif
 
   if (!TasmotaGlobal.global_state.wifi_down) {
     int32_t rssi = WiFi.RSSI();
@@ -905,7 +921,15 @@ void MqttShowState(void)
       Settings->sta_active +1, EscapeJSONString(SettingsText(SET_STASSID1 + Settings->sta_active)).c_str(), WiFi.BSSIDstr().c_str(), WiFi.channel(),
       WifiGetPhyMode().c_str(), WifiGetRssiAsQuality(rssi), rssi,
       WifiLinkCount(), WifiDowntime().c_str());
+
+    if (static_cast<uint32_t>(WiFi.localIP()) != 0) {
+      hostname = TasmotaGlobal.hostname;     // Overrule ethernet as primary IP connection
+      ipaddress = (uint32_t)WiFi.localIP();
+    }
   }
+  // I only want to show one active connection for device access
+  ResponseAppend_P(PSTR(",\"" D_CMND_HOSTNAME "\":\"%s\",\"" D_CMND_IPADDRESS "\":\"%_I\""),
+    hostname, ipaddress);
 
   ResponseJsonEnd();
 }
@@ -1103,6 +1127,12 @@ void PerformEverySecond(void)
 {
   TasmotaGlobal.uptime++;
 
+#ifdef ESP8266
+#ifdef USE_ESP8266_DEBUG_HEAP
+  ESP_HeapUsageUpdate();
+#endif  // USE_ESP8266_DEBUG_HEAP
+#endif  // ESP8266
+
   if (POWER_CYCLE_TIME == TasmotaGlobal.uptime) {
     UpdateQuickPowerCycle(false);
   }
@@ -1111,6 +1141,7 @@ void PerformEverySecond(void)
     RtcRebootReset();
 
     Settings->last_module = Settings->module;
+
 
 #ifdef USE_DEEPSLEEP
     if (!(DeepSleepEnabled() && !Settings->flag3.bootcount_update)) {  // SetOption76  - (Deepsleep) Enable incrementing bootcount (1) when deepsleep is enabled
@@ -1121,6 +1152,17 @@ void PerformEverySecond(void)
     }
 #endif
   }
+
+#if defined(ESP32) && defined(USE_HEAP_MAP)
+  if (BOOT_LOOP_TIME == TasmotaGlobal.uptime) {
+    HEAP_MAP(PSTR("boot"))                       // end of boot
+    HeapMapGlobal.boot_done = true;              // with HEAP_MAP_EVENTS_BOOT_ONLY stop logging stages and driver calls
+  } else if (HEAP_MAP_PERIOD && (TasmotaGlobal.uptime > BOOT_LOOP_TIME) && (0 == (TasmotaGlobal.uptime % HEAP_MAP_PERIOD))) {
+    char stage[16];
+    snprintf_P(stage, sizeof(stage), PSTR("up %us"), (unsigned int)TasmotaGlobal.uptime);
+    HeapMap(stage, false);                       // periodic row
+  }
+#endif  // ESP32 and USE_HEAP_MAP
 
   if (TasmotaGlobal.power_on_delay) {
     if (1 == Settings->param[P_POWER_ON_DELAY2]) {       // SetOption47 1
@@ -1622,6 +1664,11 @@ void Every250mSeconds(void)
   case 3:
     {
       if (!TasmotaGlobal.global_state.network_down) {
+#if defined(ESP32) && defined(USE_HEAP_MAP)
+        if (!HeapMapGlobal.network_up) {               // network just connected, before network services start
+          HEAP_MAP(PSTR("network_connect"))
+        }
+#endif  // USE_HEAP_MAP
 #ifdef FIRMWARE_MINIMAL
 //#ifdef CONFIG_IDF_TARGET_ESP32C3
 #ifdef ESP32
@@ -1669,6 +1716,12 @@ void Every250mSeconds(void)
         // send FUNC_NETWORK_UP to all modules
 //        AddLog(LOG_LEVEL_DEBUG_MORE, PSTR("WIF: Sending FUNC_NETWORK_UP"));
         XdrvXsnsCall(FUNC_NETWORK_UP);
+#if defined(ESP32) && defined(USE_HEAP_MAP)
+        if (!HeapMapGlobal.network_up) {               // FUNC_NETWORK_UP is sent every second, log only on transition to up
+          HeapMapGlobal.network_up = true;
+          HEAP_MAP(PSTR("network_started"))      // network services (webserver, mDNS, ...) started
+        }
+#endif  // USE_HEAP_MAP
 
         MqttCheck();
       } else {
@@ -1680,6 +1733,9 @@ void Every250mSeconds(void)
         // send FUNC_NETWORK_DOWN to all modules
 //        AddLog(LOG_LEVEL_DEBUG_MORE, PSTR("WIF: Sending FUNC_NETWORK_DOWN"));
         XdrvXsnsCall(FUNC_NETWORK_DOWN);
+#if defined(ESP32) && defined(USE_HEAP_MAP)
+        HeapMapGlobal.network_up = false;
+#endif  // USE_HEAP_MAP
       }                                           // Every x.75 second
     }
     break;
@@ -1774,8 +1830,11 @@ void ArduinoOtaLoop(void)
 
 /********************************************************************************************/
 
-void SerialInput(void)
-{
+void SerialInput(void) {
+#ifdef USE_XYZMODEM
+  if (XYZModemActive(TXMP_TASCONSOLE)) { return; }
+#endif  // USE_XYZMODEM
+
   static uint32_t serial_polling_window = 0;
   static bool serial_buffer_overrun = false;
 
@@ -1805,11 +1864,28 @@ void SerialInput(void)
 #endif  // ESP8266
 /*-------------------------------------------------------------------------------------------*/
 
+#ifdef USE_IMPROV
+    if (ImprovSerialInput(TasmotaGlobal.serial_in_buffer,
+                          TasmotaGlobal.serial_in_byte_counter,
+                          (char)TasmotaGlobal.serial_in_byte)) {
+      TasmotaGlobal.serial_in_byte_counter = 0;
+      continue;
+    }
+#endif  // USE_IMPROV
+
+/*-------------------------------------------------------------------------------------------*/
+
     if (XdrvCall(FUNC_SERIAL)) {
       TasmotaGlobal.serial_in_byte_counter = 0;
       Serial.flush();
       return;
     }
+
+/*-------------------------------------------------------------------------------------------*/
+
+#ifdef USE_XYZMODEM
+    if (XYZModemStart(TXMP_TASCONSOLE, TasmotaGlobal.serial_in_byte)) { return; }
+#endif  // USE_XYZMODEM
 
 /*-------------------------------------------------------------------------------------------*/
 
@@ -1826,6 +1902,11 @@ void SerialInput(void)
           serial_buffer_overrun = true;                                            // Signal overrun but continue reading input to flush until '\n' (EOL)
         }
       }
+#ifdef USE_SERIAL_BACKSPACE
+      else if (TasmotaGlobal.serial_in_byte == 0x08 && TasmotaGlobal.serial_in_byte_counter > 0) { // Backspace (BS) - remove last char from buffer
+        TasmotaGlobal.serial_in_byte_counter--;
+      }
+#endif  // USE_SERIAL_BACKSPACE
     } else {
       if (TasmotaGlobal.serial_in_byte || Settings->flag.mqtt_serial_raw) {        // Any char between 1 and 127 or any char (0 - 255) - CMND_SERIALSEND3
         bool in_byte_is_delimiter =                                                // Char is delimiter when...
@@ -1870,7 +1951,7 @@ void SerialInput(void)
 
     if (!Settings->flag.mqtt_serial && (TasmotaGlobal.serial_in_byte == '\n')) {   // CMND_SERIALSEND and CMND_SERIALLOG
       TasmotaGlobal.serial_in_buffer[TasmotaGlobal.serial_in_byte_counter] = 0;    // Serial data completed
-      TasmotaGlobal.seriallog_level = (Settings->seriallog_level < LOG_LEVEL_INFO) ? (uint8_t)LOG_LEVEL_INFO : Settings->seriallog_level;
+      SetMinimumSeriallog();
       if (serial_buffer_overrun) {
         AddLog(LOG_LEVEL_INFO, PSTR(D_LOG_COMMAND "Serial buffer overrun"));
       } else {
@@ -1923,12 +2004,34 @@ void SerialInput(void)
 String console_buffer = "";
 
 void TasConsoleInput(void) {
+#ifdef USE_XYZMODEM
+  if (XYZModemActive(TXMP_TASCONSOLE)) { return; }
+#endif  // USE_XYZMODEM
+
   static bool console_buffer_overrun = false;
 
   while (TasConsole.available()) {
     delay(0);
     char console_in_byte = TasConsole.read();
 
+#ifdef USE_IMPROV
+    if (ImprovSerialInput(console_buffer.c_str(),
+                          console_buffer.length(),
+                          console_in_byte)) {
+      console_buffer = "";
+      continue;
+    }
+#endif  // USE_IMPROV
+
+#ifdef USE_XYZMODEM
+    if (XYZModemStart(TXMP_TASCONSOLE, console_in_byte)) { return; }
+#endif  // USE_XYZMODEM
+
+#ifdef USE_SERIAL_BACKSPACE
+    if (console_in_byte == 0x08 && console_buffer.length() > 0) { // Backspace (BS) - remove last char from buffer
+      console_buffer.remove(console_buffer.length() - 1);
+    } else
+#endif  // USE_SERIAL_BACKSPACE
     if (isprint(console_in_byte)) {                       // Any char between 32 and 127
       if (console_buffer.length() < INPUT_BUFFER_SIZE) {  // Add char to string if it still fits
         console_buffer += console_in_byte;
@@ -1937,7 +2040,7 @@ void TasConsoleInput(void) {
       }
     }
     else if (console_in_byte == '\n') {
-      TasmotaGlobal.seriallog_level = (Settings->seriallog_level < LOG_LEVEL_INFO) ? (uint8_t)LOG_LEVEL_INFO : Settings->seriallog_level;
+      SetMinimumSeriallog();
       if (console_buffer_overrun) {
         AddLog(LOG_LEVEL_INFO, PSTR(D_LOG_COMMAND "USB buffer overrun"));
       } else {
@@ -1958,6 +2061,10 @@ void TasConsoleInput(void) {
 
 void GpioInit(void)
 {
+#ifdef SOC_GP_LDO_SUPPORTED
+  LdoInit();                                               // Power IO banks before any GPIO use
+#endif  // SOC_GP_LDO_SUPPORTED
+
   if (!ValidModule(Settings->module)) {
     uint32_t module = MODULE;
     if (!ValidModule(MODULE)) {
@@ -2120,13 +2227,29 @@ void GpioInit(void)
     }
   }
 
-  analogWriteRange(Settings->pwm_range);      // Default is 1023 (Arduino.h)
-  analogWriteFreq(Settings->pwm_frequency);   // Default is 1000 (core_esp8266_wiring_pwm.c)
-
 #ifdef ESP8266
   if ((2 == Pin(GPIO_TXD)) || (H801 == TasmotaGlobal.module_type)) { Serial.set_tx(2); }
   SetSerialSwap();
 #endif
+
+#if defined(ESP32) && defined(USE_USB_CDC_CONSOLE)
+  // The command console falls back to UART0 when no USB host is detected at boot
+  // (see tasmota.ino, "Fall back to serial port"). On SoCs whose default UART0 pins
+  // are ordinary GPIOs (ESP32-S3 43/44, C3/C6 20/21) a template may assign them to
+  // another function. UART0 keeps driving those pads, which silently corrupts that
+  // function, so release the console rather than the pins.
+  if (tasconsole_serial &&
+      (TasmotaGlobal.gpio_pin[(uint32_t)SOC_TX0] || TasmotaGlobal.gpio_pin[(uint32_t)SOC_RX0])) {
+    AddLog(LOG_LEVEL_INFO, PSTR("CMD: Serial console released, GPIO%d/GPIO%d used by template"),
+           (int)SOC_TX0, (int)SOC_RX0);
+    TasmotaGlobal.seriallog_level = 0;    // Stop logging to a console that is about to go away
+    Settings->seriallog_level = 0;
+    Serial.flush();
+    Serial.end();                         // Detaches the pads so the template function owns them
+    TasConsole = Serial;                  // Refresh the copy, it must not point at a released UART
+    tasconsole_serial = false;
+  }
+#endif  // ESP32 && USE_USB_CDC_CONSOLE
 
   uint32_t sspi_mosi = (PinUsed(GPIO_SSPI_SCLK) && PinUsed(GPIO_SSPI_MOSI)) ? SPI_MOSI : SPI_NONE;
   uint32_t sspi_miso = (PinUsed(GPIO_SSPI_SCLK) && PinUsed(GPIO_SSPI_MISO)) ? SPI_MISO : SPI_NONE;
@@ -2195,25 +2318,6 @@ void GpioInit(void)
       digitalWrite(i, 0);
     }
 
-/*
-  // Until 20210726
-
-    // Set any non-used GPIO to INPUT - Related to resetPins() in support_legacy_cores.ino
-    // Doing it here solves relay toggles at restart.
-#if CONFIG_IDF_TARGET_ESP32C3
-    else if (((i < 11) || (i > 17)) && (GPIO_NONE == mpin)) {  // Skip SPI flash interface
-      if (!((20 == i) || (21 == i))) {             // Skip serial
-        pinMode(i, INPUT);
-      }
-    }
-#else // CONFIG_IDF_TARGET_ESP32C3
-    else if (((i < 6) || (i > 11)) && (GPIO_NONE == mpin)) {  // Skip SPI flash interface
-      if (!((1 == i) || (3 == i))) {             // Skip serial
-        pinMode(i, INPUT);
-      }
-    }
-#endif // CONFIG_IDF_TARGET_ESP32C3
-*/
 #ifdef ESP8266
     // Set any non-used GPIO to INPUT - Related to resetPins() in support_legacy_cores.ino
     // Doing it here solves relay toggles at restart.
@@ -2235,46 +2339,21 @@ void GpioInit(void)
   }
 
   if (Settings->param[P_POWER_ON_DELAY]) {                 // SetOption46 - Allow Wemos D1 power to stabilize before starting I2C polling for devices powered locally
-    uint32_t init_delay = Settings->param[P_POWER_ON_DELAY] * 10;
-    AddLog(LOG_LEVEL_DEBUG, PSTR("INI: SO46 Wait %d msec"), init_delay);
+    uint32_t init_delay = Settings->param[P_POWER_ON_DELAY] * 10;     // 1 .. 200 = 10 .. 2000 msec delay
+    if (Settings->param[P_POWER_ON_DELAY] > 200) {                 
+      init_delay = (Settings->param[P_POWER_ON_DELAY] - 200) * 1000;  // 201 .. 255 = 1 .. 55 seconds delay for devices like DALI gear to become ready
+    }
+    float fdelay = (float)init_delay * 0.001f;
+    AddLog(LOG_LEVEL_DEBUG, PSTR("INI: SO46 Wait %3_f sec"), &fdelay);
     delay(init_delay);
   }
 
 #ifdef USE_I2C
-/*
-  if (PinUsed(GPIO_I2C_SCL) && PinUsed(GPIO_I2C_SDA)) {
-    TasmotaGlobal.i2c_enabled[0] = I2cBegin(Pin(GPIO_I2C_SDA), Pin(GPIO_I2C_SCL));
-#ifdef ESP32
-    if (TasmotaGlobal.i2c_enabled[0]) {
-      AddLog(LOG_LEVEL_INFO, PSTR("I2C: Bus1 using GPIO%02d(SCL) and GPIO%02d(SDA)"), Pin(GPIO_I2C_SCL), Pin(GPIO_I2C_SDA));
-    }
-#endif
-  }
-#ifdef ESP32
-  if (PinUsed(GPIO_I2C_SCL, 1) && PinUsed(GPIO_I2C_SDA, 1)) {
-    TasmotaGlobal.i2c_enabled[1] = I2cBegin(Pin(GPIO_I2C_SDA, 1), Pin(GPIO_I2C_SCL, 1), 1);
-    if (TasmotaGlobal.i2c_enabled[1]) {
-      AddLog(LOG_LEVEL_INFO, PSTR("I2C: Bus2 using GPIO%02d(SCL) and GPIO%02d(SDA)"), Pin(GPIO_I2C_SCL, 1), Pin(GPIO_I2C_SDA, 1));
-    }
-  }
-#endif
-*/
-  uint32_t max_bus = 1;
-#ifdef USE_I2C_BUS2
-  max_bus = 2;
-#endif  // USE_I2C_BUS2
-  for (uint32_t bus = 0; bus < max_bus; bus++) {
+  for (uint32_t bus = 0; bus < MAX_I2C; bus++) {
     if (PinUsed(GPIO_I2C_SCL, bus) && PinUsed(GPIO_I2C_SDA, bus)) {
       if (I2cBegin(Pin(GPIO_I2C_SDA, bus), Pin(GPIO_I2C_SCL, bus), bus)) {
-        if (0 == bus) { 
-          TasmotaGlobal.i2c_enabled[0] = true;
-        }
-#ifdef USE_I2C_BUS2
-        else { 
-          TasmotaGlobal.i2c_enabled[1] = true;
-        }
+        TasmotaGlobal.i2c_enabled[bus] = true;
         AddLog(LOG_LEVEL_INFO, PSTR("I2C: Bus%d using GPIO%02d(SCL) and GPIO%02d(SDA)"), bus +1, Pin(GPIO_I2C_SCL, bus), Pin(GPIO_I2C_SDA, bus));
-#endif  // USE_I2C_BUS2
       }
     }
   }
@@ -2329,7 +2408,9 @@ void GpioInit(void)
   }
 #endif  // ESP8266
 
+  analogWriteRange(Settings->pwm_range);      // Default is 1023 (Arduino.h)
   GpioInitPwm();
+  analogWriteFreq(Settings->pwm_frequency);   // Default is 1000 (core_esp8266_wiring_pwm.c) (Moved after init PWM #25155)
 
   for (uint32_t i = 0; i < MAX_LEDS; i++) {
     if (PinUsed(GPIO_LED1, i)) {

@@ -26,6 +26,13 @@ class Matter_Commissioning
 
   static var PBKDF_ITERATIONS = 1000  # I don't see any reason to choose a different number
   static var PASE_TIMEOUT = 10*60     # default open commissioning window (10 minutes)
+  # Operational discovery TXT records per Matter 1.4.1 spec §4.3.2
+  static var OP_DISCOVERY_TXT = {
+    "SII": 500,     # SESSION_IDLE_INTERVAL (ms)
+    "SAI": 300,     # SESSION_ACTIVE_INTERVAL (ms)
+    "SAT": 4000,    # SESSION_ACTIVE_THRESHOLD (ms)
+    "T":   0        # TCP support bitmap: 0 = UDP only
+  }
   # Commissioning open
   var commissioning_open              # timestamp for timeout of commissioning (millis()) or `nil` if closed
   var commissioning_iterations        # current PBKDF number of iterations
@@ -62,7 +69,7 @@ class Matter_Commissioning
   # dispatch every second click to sub-objects that need it
   def every_second()
     if self.commissioning_open != nil && tasmota.time_reached(self.commissioning_open)    # timeout reached, close provisioning
-      self.commissioning_open = nil
+      self.stop_basic_commissioning()   # properly close commissioning and remove mDNS
     end
   end
 
@@ -110,7 +117,13 @@ class Matter_Commissioning
     self.commissioning_L  = L
     self.commissioning_admin_fabric = admin_fabric
 
-    tasmota.when_network_up(def () self.mdns_announce_PASE() end)
+    # If network is down, the announce is deferred; the window may be closed
+    # by then (timeout, revoke...), so check again before announcing
+    tasmota.when_network_up(def ()
+      if self.commissioning_open != nil
+        self.mdns_announce_PASE()
+      end
+    end)
   end
 
   #############################################################
@@ -254,8 +267,8 @@ class Matter_Commissioning
         var eth = tasmota.eth()
         self.hostname_eth  = string.replace(eth.find("mac"), ':', '')
         if !self.device.ipv4only || !eth.contains('ip6local')
-          # log(format("MTR: calling mdns.add_hostname(%s, %s, %s)", self.hostname_eth, eth.find('ip6local',''), eth.find('ip','')), 4)
-          mdns.add_hostname(self.hostname_eth, eth.find('ip6local',''), eth.find('ip',''), eth.find('ip6',''))
+          log(f"MTR: calling mdns.add_hostname({self.hostname_eth}, {eth.find('ip6local','')}, {eth.find('ip','')})", 3)
+          mdns.add_hostname(self.hostname_eth, eth.find('ip6local',''), eth.find('ip',''))
         else
           log(format("MTR: calling mdns.add_hostname(%s, %s)", self.hostname_eth, eth.find('ip','')), 3)
           mdns.add_hostname(self.hostname_eth, eth.find('ip',''))
@@ -264,8 +277,8 @@ class Matter_Commissioning
         var wifi = tasmota.wifi()
         self.hostname_wifi = string.replace(wifi.find("mac"), ':', '')
         if !self.device.ipv4only || !wifi.contains('ip6local')
-          # log(format("MTR: calling mdns.add_hostname(%s, %s, %s)", self.hostname_wifi, wifi.find('ip6local',''), wifi.find('ip','')), 4)
-          mdns.add_hostname(self.hostname_wifi, wifi.find('ip6local',''), wifi.find('ip',''), wifi.find('ip6',''))
+          log(f"MTR: calling mdns.add_hostname({self.hostname_wifi}, {wifi.find('ip6local','')}, {wifi.find('ip','')})", 3)
+          mdns.add_hostname(self.hostname_wifi, wifi.find('ip6local',''), wifi.find('ip',''))
         else
           log(format("MTR: calling mdns.add_hostname(%s, %s)", self.hostname_wifi, wifi.find('ip','')), 3)
           mdns.add_hostname(self.hostname_wifi, wifi.find('ip',''))
@@ -285,12 +298,30 @@ class Matter_Commissioning
     import mdns
     import crypto
 
+    # Per Matter 1.4.1 spec section 4.3.4 and 4.13.1:
+    # SII = SESSION_IDLE_INTERVAL (ms) - MRP retry interval when node is Idle (default 500ms)
+    # SAI = SESSION_ACTIVE_INTERVAL (ms) - MRP retry interval when node is Active (default 300ms)
+    # SAT = SESSION_ACTIVE_THRESHOLD (ms) - time node stays active after network activity (default 4000ms)
+    # For always-on WiFi devices, we use the spec defaults since device is always responsive
+    var sii = 500     # SESSION_IDLE_INTERVAL: 500ms (spec default)
+    var sai = 300     # SESSION_ACTIVE_INTERVAL: 300ms (spec default)
+
+    # Remove any previous PASE announce before creating new random instance names,
+    # otherwise re-opening an already open window leaves an orphan `_matterc` entry
+    self.mdns_remove_PASE()
+
+    # CM=1 Basic Commissioning (root passcode), CM=2 Enhanced Commissioning (opened by an admin with OpenCommissioningWindow)
+    var cm = (self.commissioning_admin_fabric != nil) ? 2 : 1
+
     var services = {
       "VP": f"{self.device.VENDOR_ID}+{self.device.PRODUCT_ID}",
       "D": self.commissioning_discriminator,
-      "CM":1,                           # requires passcode
+      "CM":cm,                          # commissioning mode, requires passcode
       "T":0,                            # no support for TCP
-      "SII":5000, "SAI":300
+      "SII":sii, "SAI":sai
+      # Note: ICD key is only for devices that support LITS (Long Idle Time Support) feature
+      # Per spec: "The key SHALL NOT be provided by a Node that does not support the ICD Long Idle Time operating mode"
+      # Since we're a simple SIT device without LITS, we don't advertise ICD key
     }
 
     self.commissioning_instance_wifi = crypto.random(8).tohex()    # 16 characters random hostname
@@ -315,7 +346,7 @@ class Matter_Commissioning
         subtype = "_V" + str(self.device.VENDOR_ID)
         log("MTR: adding subtype: "+subtype, 3)
         mdns.add_subtype("_matterc", "_udp", self.commissioning_instance_eth, self.hostname_eth, subtype)
-        subtype = "_CM1"
+        subtype = "_CM"                 # Commissioning Mode subtype (spec 4.3.1.8), no digit
         log("MTR: adding subtype: "+subtype, 3)
         mdns.add_subtype("_matterc", "_udp", self.commissioning_instance_eth, self.hostname_eth, subtype)
       end
@@ -337,7 +368,7 @@ class Matter_Commissioning
         subtype = "_V" + str(self.device.VENDOR_ID)
         log("MTR: adding subtype: "+subtype, 3)
         mdns.add_subtype("_matterc", "_udp", self.commissioning_instance_wifi, self.hostname_wifi, subtype)
-        subtype = "_CM1"
+        subtype = "_CM"                 # Commissioning Mode subtype (spec 4.3.1.8), no digit
         log("MTR: adding subtype: "+subtype, 3)
         mdns.add_subtype("_matterc", "_udp", self.commissioning_instance_wifi, self.hostname_wifi, subtype)
       end
@@ -352,21 +383,24 @@ class Matter_Commissioning
   def mdns_remove_PASE()
     import mdns
 
-    try
-      if self.mdns_pase_eth
-        log(format("MTR: calling mdns.remove_service(%s, %s, %s, %s)", "_matterc", "_udp", self.commissioning_instance_eth, self.hostname_eth), 3)
+    # each interface is removed independently so that a failure on one does not leave the other announced
+    if self.mdns_pase_eth
+      self.mdns_pase_eth = false
+      try
         log(format("MTR: remove mDNS on %s '%s'", "eth", self.commissioning_instance_eth), 3)
-        self.mdns_pase_eth = false
         mdns.remove_service("_matterc", "_udp", self.commissioning_instance_eth, self.hostname_eth)
+      except .. as e, m
+        log("MTR: Exception" + str(e) + "|" + str(m), 2)
       end
-      if self.mdns_pase_wifi
-        log(format("MTR: calling mdns.remove_service(%s, %s, %s, %s)", "_matterc", "_udp", self.commissioning_instance_wifi, self.hostname_wifi), 3)
+    end
+    if self.mdns_pase_wifi
+      self.mdns_pase_wifi = false
+      try
         log(format("MTR: remove mDNS on %s '%s'", "wifi", self.commissioning_instance_wifi), 3)
-        self.mdns_pase_wifi = false
         mdns.remove_service("_matterc", "_udp", self.commissioning_instance_wifi, self.hostname_wifi)
+      except .. as e, m
+        log("MTR: Exception" + str(e) + "|" + str(m), 2)
       end
-    except .. as e, m
-      log("MTR: Exception" + str(e) + "|" + str(m), 2)
     end
   end
 
@@ -390,17 +424,24 @@ class Matter_Commissioning
       var op_node = k_fabric.tohex() + "-" + device_id.tohex()
       log("MTR: Operational Discovery node = " + op_node, 3)
 
+      # Operational discovery TXT records (Matter 1.4.1 §4.3.2):
+      #   SII = 500   - SESSION_IDLE_INTERVAL (ms), MRP retry interval when idle
+      #   SAI = 300   - SESSION_ACTIVE_INTERVAL (ms), MRP retry interval when active
+      #   SAT = 4000  - SESSION_ACTIVE_THRESHOLD (ms), duration node stays active
+      #   T   = 0     - TCP support bitmap, 0 = UDP only
+      var services = self.OP_DISCOVERY_TXT
+
       # mdns
       if (tasmota.eth().find("up"))
         log(format("MTR: adding mDNS on %s '%s' ptr to `%s.local`", "eth", op_node, self.hostname_eth), 3)
-        mdns.add_service("_matter","_tcp", 5540, nil, op_node, self.hostname_eth)
+        mdns.add_service("_matter","_tcp", 5540, services, op_node, self.hostname_eth)
         var subtype = "_I" + k_fabric.tohex()
         log("MTR: adding subtype: "+subtype, 3)
         mdns.add_subtype("_matter", "_tcp", op_node, self.hostname_eth, subtype)
       end
       if (tasmota.wifi().find("up"))
         log(format("MTR: adding mDNS on %s '%s' ptr to `%s.local`", "wifi", op_node, self.hostname_wifi), 3)
-        mdns.add_service("_matter","_tcp", 5540, nil, op_node, self.hostname_wifi)
+        mdns.add_service("_matter","_tcp", 5540, services, op_node, self.hostname_wifi)
         var subtype = "_I" + k_fabric.tohex()
         log("MTR: adding subtype: "+subtype, 3)
         mdns.add_subtype("_matter", "_tcp", op_node, self.hostname_wifi, subtype)

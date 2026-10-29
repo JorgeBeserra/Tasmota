@@ -28,7 +28,7 @@
  * Use online command StateText to translate ON, OFF, HOLD and TOGGLE.
  * Use online command Prefix to translate cmnd, stat and tele.
  *
- * Updated until v14.3.0.7 - Last update 08.12.2024
+ * Updated until v15.6.0.3 - Last update 09.10.2026
 \*********************************************************************/
 
 //#define LANGUAGE_MODULE_NAME         // Enable to display "Module Generic" (ie Spanish), Disable to display "Generic Module" (ie English)
@@ -52,6 +52,7 @@
 
 // Common
 #define D_ABSOLUTE_HUMIDITY "Abs․ Feuchtigkeit"
+#define D_ADDRESS "Address"
 #define D_ADMIN "Admin"
 #define D_AIR_QUALITY "Luftqualität"
 #define D_AP "AP"                    // Access Point
@@ -59,11 +60,13 @@
 #define D_AT "an"
 #define D_AUTO "AUTO"
 #define D_AUTO_UPDATE "Auto Update"
-#define D_BATTERY "Batterie"
+#define D_AUTOMATIC "Automatik"
 #define D_BATT "Batt"                // Short for Battery
+#define D_BATTERY "Batterie"
 #define D_BATTERY_CHARGE "Ladung"    // Battery charge in %
 #define D_BLINK "Blinken"
 #define D_BLINKOFF "BlinkenAus"
+#define D_BOOST "Boost"
 #define D_BOOT_COUNT "Startvorgänge"
 #define D_BRIGHTLIGHT "hell"
 #define D_BSSID "BSSID"
@@ -72,24 +75,26 @@
 #define D_BYTES "Bytes"
 #define D_CELSIUS "Celsius"
 #define D_CHANNEL "Kanal"
+#define D_CHILD_LOCK "Kindersicherung"
 #define D_CO2 "CO₂"
 #define D_CODE "code"                // Button code
 #define D_COLDLIGHT "kalt"
+#define D_COLOR "Color"
 #define D_COMMAND "Befehl"
 #define D_CONNECTED "verbunden"
 #define D_CORS_DOMAIN "CORS Domain"
-#define D_COLOR "Color"
 #define D_COUNT "Anzahl"             // used as a noun throughout
 #define D_COUNTER "Zähler"
 #define D_CT_POWER "CT Power"
 #define D_CURRENT "Strom"            // As in Voltage and Current
 #define D_CURRENT_NEUTRAL "Strom Neutral"
-#define D_DATA "Daten"
 #define D_DARKLIGHT "dunkel"
+#define D_DATA "Daten"
 #define D_DEBUG "debug"
+#define D_DECRYPTION "Entschlüsselung"
 #define D_DEWPOINT "Taupunkt"
 #define D_DISABLED "deaktiviert"
-#define D_DISCONNECTED "Disconnected"
+#define D_DISCONNECTED "getrennt"
 #define D_DISTANCE "Abstand"
 #define D_DNS_SERVER "DNS-Server"
 #define D_DO "gelöster Sauerstoff"
@@ -112,15 +117,15 @@
 #define D_FRAGMENTATION "frag․"      // Lower case abbreviated version of fragmentation used in "memory fragmentation"
 #define D_FRAME_RATE "Frame Rate"
 #define D_FREE_MEMORY "Freier Arbeitsspeicher"
-#define D_PSR_MAX_MEMORY "PS-RAM Speicher"
-#define D_PSR_FREE_MEMORY "PS-RAM freier Speicher"
 #define D_FREQUENCY "Frequenz"
 #define D_GAS "Gas"
 #define D_GATEWAY "Gateway"
 #define D_GROUP "Gruppe"
-#define D_HOST "Host"
-#define D_HALL_EFFECT "Hall Effekt"
+#define D_HALL_EFFECT "Halleffekt"
+#define D_HCHO "Formaldehyd"
 #define D_HEATINDEX "Hitzeindex"
+#define D_HOLIDAY "Ferien"
+#define D_HOST "Host"
 #define D_HOSTNAME "Hostname"
 #define D_HUMIDITY "Feuchtigkeit"
 #define D_ILLUMINANCE "Beleuchtungsstärke"
@@ -131,12 +136,16 @@
 #define D_INITIALIZED "initialisiert"
 #define D_IP_ADDRESS "IP-Adresse"
 #define D_LIGHT "Licht"
-#define D_LWT "LWT"
+#define D_LOW "Niedrig"
 #define D_LQI "LQI"                  // Zigbee Link Quality Index
+#define D_LWT "LWT"
+#define D_MANUAL "Manuell"
 #define D_MODULE "Modul"
 #define D_MOISTURE "Feuchtigkeit"
+#define D_MQ "MQ"
 #define D_MQTT "MQTT"
 #define D_MULTI_PRESS "Mehrfachdruck"
+#define D_NA "N/A"
 #define D_NOISE "Lautstärke"
 #define D_NONE "keine"
 #define D_NOX "NOₓ"
@@ -147,10 +156,9 @@
 #define D_ON "an"
 #define D_ONLINE "Online"
 #define D_ORP "ORP"
+#define D_PARTITION "Partition"      // As in flash and firmware partition
 #define D_PASSWORD "Passwort"
 #define D_PH "pH"
-#define D_MQ "MQ"
-#define D_PARTITION "Partition"      // As in flash and firmware partition
 #define D_PORT "Port"
 #define D_POWER_FACTOR "Leistungsfaktor"
 #define D_POWERUSAGE "Leistung"
@@ -163,27 +171,31 @@
 #define D_PROGRAM_FLASH_SIZE "Flash nutzbar"
 #define D_PROGRAM_SIZE "Programmgröße"
 #define D_PROJECT "Projekt"
+#define D_PSR_FREE_MEMORY "PS-RAM freier Speicher"
+#define D_PSR_MAX_MEMORY "PS-RAM Speicher"
 #define D_RAIN "Regen"
 #define D_RANGE "Bereich"
 #define D_RECEIVED "erhalten"
 #define D_RESTART "Neustart"
-#define D_RESTARTING "starte neu"
 #define D_RESTART_REASON "Grund für Neustart"
+#define D_RESTARTING "starte neu"
 #define D_RETAINED "beibehalten"
 #define D_RULE "Regel"
 #define D_SAVE "Speichern"
 #define D_SENSOR "Sensor"
+#define D_SOC "Ladestatus"
+#define D_SOH "Gesundheitsstatus"
 #define D_SSID "SSID"
 #define D_START "Start"
 #define D_STD_TIME "STD"
 #define D_STOP "Stop"
 #define D_SUBNET_MASK "Subnetzmaske"
 #define D_SUBSCRIBE_TO "abonniere"
-#define D_UNSUBSCRIBE_FROM "löse Abo․ von"
 #define D_SUCCESSFUL "erfolgreich"
 #define D_SUNRISE "Sonnenaufgang"
 #define D_SUNSET "Sonnenuntergang"
 #define D_TEMPERATURE "Temperatur"
+#define D_TIME_OF_DAY "Uhrzeit"
 #define D_TO "zu"
 #define D_TOGGLE "An/Aus"
 #define D_TOPIC "Topic"
@@ -194,6 +206,7 @@
 #define D_TWILIGHT_ASTRONOMICAL "astronomisch"
 #define D_TWILIGHT_CIVIL "zivil"
 #define D_TWILIGHT_NAUTICAL "nautisch"
+#define D_UNSUBSCRIBE_FROM "löse Abo․ von"
 #define D_UPLOAD "Upload"
 #define D_UPTIME "Laufzeit"
 #define D_USED "genutzt"
@@ -213,15 +226,14 @@
 #define D_VOC "VOC"
 #define D_VOLTAGE "Spannung"
 #define D_VOLUME "Volumen"
-#define D_WEIGHT "Gewicht"
 #define D_WARMLIGHT "warm"
-#define D_WEB_SERVER "Webserver"
-#define D_SOC "Ladestatus"
-#define D_SOH "Gesundheitsstatus"
 #define D_WATER_DEPTH "Wassertiefe"
+#define D_WEB_SERVER "Webserver"
+#define D_WEIGHT "Gewicht"
+#define D_WINDOW_OPEN "Fenster offen"
 
 // tasmota.ino
-#define D_WARNING_MINIMAL_VERSION "ACHTUNG: Diese Version unterstützt keine persistenten Einstellungen"
+#define D_WARNING_MINIMAL_VERSION "ACHTUNG: Einstellungen in dieser Version werden nicht gespeichert!"
 #define D_LEVEL_10 "level 1-0"
 #define D_LEVEL_01 "level 0-1"
 #define D_SERIAL_LOGGING_DISABLED "Serielles Logging deaktiviert"
@@ -261,7 +273,7 @@
 // xdrv_02_webserver.ino
 #define D_NOSCRIPT "JavaScript aktivieren um Tasmota benutzen zu können"
 #define D_SAFEBOOT "SAFEBOOT"
-#define D_MINIMAL_FIRMWARE_PLEASE_UPGRADE "MINIMUM-Firmware<br>bitte upgraden"
+#define D_MINIMAL_FIRMWARE_PLEASE_UPGRADE "MINIMAL-Firmware<br>Upgrade erforderlich"
 #define D_WEBSERVER_ACTIVE_ON "Webserver aktiv"
 #define D_WITH_IP_ADDRESS "mit IP-Adresse"
 #define D_WEBSERVER_STOPPED "Webserver angehalten"
@@ -277,7 +289,7 @@
 #define D_BUTTON_TOGGLE "An/Aus"
 #define D_CONFIGURATION "Einstellungen"
 #define D_INFORMATION "Informationen"
-#define D_FIRMWARE_UPGRADE "Firmware Update"
+#define D_FIRMWARE_UPGRADE "Firmwareupdate"
 #define D_MANAGEMENT "Werkzeuge"
 #define D_GPIO_VIEWER "GPIO Viewer"
 #define D_CONSOLE "Konsole"
@@ -311,7 +323,7 @@
 #define D_REFRESH_TO_SCAN_AGAIN "Aktualisieren, um erneut zu suchen"
 #define D_DUPLICATE_ACCESSPOINT "AccessPoint duplizieren"
 #define D_SKIPPING_LOW_QUALITY "WLAN Signal zu schwach"
-#define D_MODE "Mode"
+#define D_MODE "Modus"
 #define D_RSSI "RSSI"
 #define D_WEP "WEP"
 #define D_WPA_PSK "WPA-PSK"
@@ -346,6 +358,7 @@
 
 #define D_OTHER_PARAMETERS "Einstellungen"
 #define D_TEMPLATE "Vorlage"
+#define D_TEMPLATE_WRONG_ARCH "MCU-Typ wurde korrigiert"
 #define D_ACTIVATE "Aktivieren"
 #define D_DEVICE_NAME "Gerätename"
 #define D_WEB_ADMIN_PASSWORD "Passwort für Weboberfläche"
@@ -372,6 +385,7 @@
 #define D_PROGRAM_VERSION "Tasmota Version"
 #define D_BUILD_DATE_AND_TIME "Erstellt"
 #define D_CORE_AND_SDK_VERSION "Core-/SDK-Version"
+#define D_HOSTED_MCU "Hosted MCU"
 #define D_FLASH_WRITE_COUNT "Schreibzyklen"
 #define D_MAC_ADDRESS "MAC-Adresse"
 #define D_MQTT_HOST "Host"
@@ -392,7 +406,7 @@
 #define D_UPGRADE_BY_WEBSERVER "Update über Webserver"
 #define D_OTA_URL "OTA-URL"
 #define D_START_UPGRADE "Starten"
-#define D_UPGRADE_BY_FILE_UPLOAD "Update Datei hochladen"
+#define D_UPGRADE_BY_FILE_UPLOAD "Updatedatei hochladen"
 #define D_UPLOAD_FACTORY "Wechsle zur Safeboot Partition"
 #define D_UPLOAD_STARTED "Upload gestartet"
 #define D_UPGRADE_STARTED "Update gestartet"
@@ -452,6 +466,8 @@
 #define D_DOMOTICZ_IDX "Idx"
 #define D_DOMOTICZ_KEY_IDX "Key Idx"
 #define D_DOMOTICZ_SWITCH_IDX "Switch Idx"
+#define D_DOMOTICZ_KEY "Key"
+#define D_DOMOTICZ_SWITCH "Switch"
 #define D_DOMOTICZ_SENSOR_IDX "Sensor Idx"
   #define D_DOMOTICZ_TEMP "Temp"
   #define D_DOMOTICZ_TEMP_HUM "Temp,Hum"
@@ -470,7 +486,6 @@
 #define D_TIMER_PARAMETERS "Zeitplan"
 #define D_TIMER_ENABLE "Zeitpläne aktivieren"
 #define D_TIMER_ARM "Aktiv"
-#define D_TIMER_TIME "Uhrzeit"
 #define D_TIMER_DAYS "Wochentage"
 #define D_TIMER_REPEAT "Wiederholen"
 #define D_TIMER_OUTPUT "Ausgang"
@@ -501,14 +516,14 @@
 #define D_KNX_RX_SCENE "KNX SCENE RX"
 
 // xdrv_23_zigbee
-#define D_ZIGBEE_PERMITJOIN_ACTIVE "Kopplung erlaubt"
+#define D_ZIGBEE_PERMITJOIN_ACTIVE "Zigbee Kopplung aktiv"
 #define D_ZIGBEE_MAPPING_TITLE "Zigbee Karte"
 #define D_ZIGBEE_NOT_STARTED "Zigbee nicht gestartet"
-#define D_ZIGBEE_MAPPING_IN_PROGRESS_SEC "Karte in Erstellung (%d s․ verbleibend)"
-#define D_ZIGBEE_MAPPING_NOT_PRESENT "Keine Karte"
-#define D_ZIGBEE_MAP_REFRESH "Karte erneuern"
-#define D_ZIGBEE_MAP "Karte"
-#define D_ZIGBEE_PERMITJOIN "Kopplung ein"
+#define D_ZIGBEE_MAPPING_IN_PROGRESS_SEC "Karte wird erstellt (%d s)"
+#define D_ZIGBEE_MAPPING_NOT_PRESENT "Keine Karte verfügbar"
+#define D_ZIGBEE_MAP_REFRESH "Karte aktualisieren"
+#define D_ZIGBEE_MAP "Zigbee Karte"
+#define D_ZIGBEE_PERMITJOIN "Zigbee Kopplung aktivieren"
 #define D_ZIGBEE_GENERATE_KEY "Erzeuge zufälligen Netzwerkschlüssel"
 #define D_ZIGBEE_UNKNOWN_DEVICE "Unbekanntes Gerät"
 #define D_ZIGBEE_UNKNOWN_ATTRIBUTE "Unbekanntes Attribut"
@@ -537,6 +552,10 @@
 #define D_ENERGY_TODAY "Energie heute"
 #define D_ENERGY_YESTERDAY "Energie gestern"
 #define D_ENERGY_TOTAL "Energie gesamt"
+
+// xdrv_92_vid6608.ino
+#define D_VID6608_F "VID6608 F"
+#define D_VID6608_CW "VID6608 CW"
 
 // xsns_100_ina3221.ino
 #define  D_UNIT_CHARGE                    "Ah"
@@ -577,9 +596,9 @@
 #define D_CONFIGURE_BLE       "BLE"
 #define D_BLE_PARAMETERS      "BLE Parameter"
 #define D_BLE_ENABLE          "BLE aktivieren"
-#define D_BLE_ACTIVESCAN      "Aktiv scannen (*)"
+#define D_BLE_ACTIVESCAN      "Aktiv scannen¹"
 #define D_BLE_DEVICES         "Erkannte Geräte"
-#define D_BLE_REMARK          "Mit (*) markierte Geräte werden nicht gespeichert."
+#define D_BLE_REMARK          "¹ Einstellung wird nicht dauerhaft gespeichert"
 
 // xsns_05_ds18b20.ino
 #define D_SENSOR_BUSY "Sensor beschäftigt"
@@ -751,6 +770,13 @@
 #define D_SENSOR_SDIO_D1       "SDIO D1"
 #define D_SENSOR_SDIO_D2       "SDIO D2"
 #define D_SENSOR_SDIO_D3       "SDIO D3"
+#define D_SENSOR_HSDIO_CMD     "HSDIO CMD"
+#define D_SENSOR_HSDIO_CLK     "HSDIO CLK"
+#define D_SENSOR_HSDIO_RST     "HSDIO RST"
+#define D_SENSOR_HSDIO_D0      "HSDIO D0"
+#define D_SENSOR_HSDIO_D1      "HSDIO D1"
+#define D_SENSOR_HSDIO_D2      "HSDIO D2"
+#define D_SENSOR_HSDIO_D3      "HSDIO D3"
 #define D_SENSOR_BACKLIGHT     "Backlight"
 #define D_SENSOR_PMS5003_TX    "PMS5003 Tx"
 #define D_SENSOR_PMS5003_RX    "PMS5003 Rx"
@@ -955,6 +981,9 @@
 #define D_SENSOR_IEM3000_RX    "iEM3000 RX"
 #define D_SENSOR_MIEL_HVAC_TX  "MiEl HVAC Tx"
 #define D_SENSOR_MIEL_HVAC_RX  "MiEl HVAC Rx"
+#define D_SENSOR_MIEL_HVAC_MB_TX  "MiEl HVAC MB Tx"
+#define D_SENSOR_MIEL_HVAC_MB_RX  "MiEl HVAC MB Rx"
+#define D_SENSOR_MIEL_HVAC_MB_TXEN  "MiEl HVAC MB DE"
 #define D_SENSOR_PROJECTOR_CTRL_TX  "DLP Tx"
 #define D_SENSOR_PROJECTOR_CTRL_RX  "DLP Rx"
 #define D_SENSOR_SHELLY_DIMMER_BOOT0 "SHD Boot 0"
@@ -1027,6 +1056,8 @@
 #define D_SENSOR_WOOLIIS_RX    "Wooliis Rx"
 #define D_SENSOR_C8_CO2_5K_RX  "C8-CO2-5K Rx"
 #define D_SENSOR_C8_CO2_5K_TX  "C8-CO2-5K Tx"
+#define D_SENSOR_MKSKYBLU_TX   "MkSkyBlu Tx"
+#define D_SENSOR_MKSKYBLU_RX   "MkSkyBlu Rx"
 
 // Units
 #define D_UNIT_AMPERE "A"
@@ -1223,11 +1254,11 @@
 #define D_FP_UNKNOWNERROR "Fehler"                      // Any other error
 
 // xsns_90_hrg15.ino
-#define D_HRG_VALID "Valid"
-#define D_HRG_ACTIVE "Active"
-#define D_HRG_EVENT "Event"
-#define D_HRG_TOTAL "Total"
-#define D_HRG_FLOWRATE "Flow Rate"
+#define D_HRG_VALID "Gültig"
+#define D_HRG_ACTIVE "Aktiv"
+#define D_HRG_EVENT "Ereignis"
+#define D_HRG_TOTAL "Gesamt"
+#define D_HRG_FLOWRATE "Durchfluss"
 
 // xsns_96_flowratemeter.ino
 #define D_FLOWRATEMETER_NAME "Durchflussmesser"
@@ -1321,5 +1352,17 @@
 // xnrg_25_v9240.ino
 #define D_SENSOR_V9240_TX "V9240 TX"
 #define D_SENSOR_V9240_RX "V9240 RX"
+
+#define D_SENSOR_MBS_RX_ENA    "ModBr Rx Ena"
+
+// xdrv_94_modbus_relay.ino
+#define D_MODBUSRELAY_TX         "MbsRelay TX"
+#define D_MODBUSRELAY_TX_ENA     "MbsRelay TX Ena"
+#define D_MODBUSRELAY_RX         "MbsRelay RX"
+#define D_MODBUSRELAY_RX_ENA     "MbsRelay RX Ena"
+
+
+// xdrv_89_esp32_shelly_emulation.ino
+#define D_SHELLY                 "Shelly"
 
 #endif  // _LANGUAGE_DE_DE_H_

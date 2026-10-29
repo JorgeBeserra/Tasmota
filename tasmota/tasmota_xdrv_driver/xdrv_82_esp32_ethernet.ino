@@ -139,7 +139,13 @@ const uint8_t eth_type_xtable[] = {
 char eth_hostname[sizeof(TasmotaGlobal.hostname)];
 uint8_t eth_config_change;
 
+// IDF < 6: esp_interface_t / IDF >= 6: wifi_interface_t (esp_interface_t removed)
+#include "esp_idf_version.h"
+#if ESP_IDF_VERSION_MAJOR < 6
 extern esp_netif_t* get_esp_interface_netif(esp_interface_t interface);
+#else
+extern esp_netif_t* get_esp_interface_netif(wifi_interface_t interface);
+#endif
 
 void EthernetEvent(arduino_event_t *event);
 void EthernetEvent(arduino_event_t *event) {
@@ -226,10 +232,7 @@ void EthernetSetIp(void) {
 void EthernetInit(void) {
   if (!Settings->flag4.network_ethernet) { return; }
 
-  int32_t eth_type = (Settings->eth_type < sizeof(eth_type_xtable)) ? eth_type_xtable[Settings->eth_type] : 0;    // make sure we don't overflow
-  bool eth_uses_spi = (eth_type & ETH_USES_SPI);
-  eth_type = eth_type & 0x7F;     // remove SPI flag
-#if CONFIG_ETH_USE_ESP32_EMAC
+#if CONFIG_ETH_USE_ESP32_EMAC     // deprecated, please use standard module and template + configuration instead
   if (WT32_ETH01 == TasmotaGlobal.module_type) {
     Settings->eth_address = 1;                    // EthAddress
     Settings->eth_type = ETH_PHY_LAN8720;         // EthType 0 = LAN8720
@@ -237,9 +240,13 @@ void EthernetInit(void) {
   }
 #endif  // CONFIG_ETH_USE_ESP32_EMAC
 
+  int32_t eth_type = (Settings->eth_type < sizeof(eth_type_xtable)) ? eth_type_xtable[Settings->eth_type] : 0;    // make sure we don't overflow
+  bool eth_uses_spi = (eth_type & ETH_USES_SPI);
+  eth_type = eth_type & 0x7F;     // remove SPI flag
+
   if (eth_uses_spi) {
     // Uses SPI Ethernet and needs at least SPI CS being ETH MDC
-    if (!PinUsed(GPIO_ETH_PHY_MDC)) {
+    if (!PinUsed(GPIO_ETH_PHY_MDC, GPIO_ANY)) {
 #ifndef FIRMWARE_MINIMAL
       AddLog(LOG_LEVEL_DEBUG_MORE, PSTR(D_LOG_ETH "No ETH MDC as SPI CS GPIO defined"));
 #endif // FIRMWARE_MINIMAL
@@ -247,7 +254,7 @@ void EthernetInit(void) {
     }
   } else {
     // Native ESP32
-    if (!PinUsed(GPIO_ETH_PHY_MDC) && !PinUsed(GPIO_ETH_PHY_MDIO)) {  // && should be || but keep for backward compatibility
+    if (!PinUsed(GPIO_ETH_PHY_MDC, GPIO_ANY) && !PinUsed(GPIO_ETH_PHY_MDIO)) {  // && should be || but keep for backward compatibility
 #ifndef FIRMWARE_MINIMAL
       AddLog(LOG_LEVEL_DEBUG_MORE, PSTR(D_LOG_ETH "No ETH MDC and ETH MDIO GPIO defined"));
 #endif // FIRMWARE_MINIMAL
@@ -258,13 +265,14 @@ void EthernetInit(void) {
   eth_config_change = 0;
 
   strlcpy(eth_hostname, TasmotaGlobal.hostname, sizeof(eth_hostname) -5);  // Make sure there is room for "-eth"
-  strcat(eth_hostname, "-eth");
+  strlcat(eth_hostname, "-eth", sizeof(eth_hostname));  // use strlcat for defense in depth
 
   WiFi.onEvent(EthernetEvent);
 
-  int eth_mdc = Pin(GPIO_ETH_PHY_MDC);       // Ethernet SPI CS (chip select)
-  int eth_mdio = Pin(GPIO_ETH_PHY_MDIO);     // Ethernet SPI IRQ
-  int eth_power = Pin(GPIO_ETH_PHY_POWER);   // Ethernet SPI RST
+  int eth_mdc = Pin(GPIO_ETH_PHY_MDC, GPIO_ANY);  // Ethernet SPI CS (chip select)
+  uint32_t spi_bus = GetPin(eth_mdc) - AGPIO(GPIO_ETH_PHY_MDC); // 0 or 1
+  int eth_mdio = Pin(GPIO_ETH_PHY_MDIO);          // Ethernet SPI IRQ
+  int eth_power = Pin(GPIO_ETH_PHY_POWER);        // Ethernet SPI RST
 
 #ifdef USE_IPV6
   ETH.enableIPv6();   // enable Link-Local
@@ -273,16 +281,44 @@ void EthernetInit(void) {
   bool init_ok = false;
   if (!eth_uses_spi) {
 #if CONFIG_ETH_USE_ESP32_EMAC
+#ifndef FIRMWARE_MINIMAL
+    AddLog(LOG_LEVEL_INFO, PSTR(D_LOG_ETH "Ethernet using RMII"));
+#endif // FIRMWARE_MINIMAL
+#ifdef CONFIG_IDF_TARGET_ESP32P4
+    init_ok = (ETH.begin((eth_phy_type_t)eth_type, Settings->eth_address, eth_mdc, eth_mdio, eth_power, EMAC_CLK_EXT_IN));
+#else
     init_ok = (ETH.begin((eth_phy_type_t)eth_type, Settings->eth_address, eth_mdc, eth_mdio, eth_power, (eth_clock_mode_t)Settings->eth_clk_mode));
+#endif //CONFIG_IDF_TARGET_ESP32P4
 #endif  // CONFIG_ETH_USE_ESP32_EMAC
   } else {
-    // ETH_SPI_SUPPORTS_CUSTOM
-    // SPISettings(ETH_PHY_SPI_FREQ_MHZ * 1000 * 1000, MSBFIRST, SPI_MODE0);  // 20MHz
-    SPI.begin(Pin(GPIO_SPI_CLK), Pin(GPIO_SPI_MISO), Pin(GPIO_SPI_MOSI), -1);
-    init_ok = (ETH.begin((eth_phy_type_t)eth_type, Settings->eth_address, eth_mdc, eth_mdio, eth_power, SPI, ETH_PHY_SPI_FREQ_MHZ));
+#if CONFIG_SOC_SPI_PERIPH_NUM > 2 
+    if ((1 == spi_bus) && (SPI_MOSI_MISO != TasmotaGlobal.spi_enabled2)) {
+#ifndef FIRMWARE_MINIMAL
+      AddLog(LOG_LEVEL_DEBUG_MORE, PSTR(D_LOG_ETH "No SPI bus2 GPIO defined"));
+#endif // FIRMWARE_MINIMAL
+      return;
+    } else
+#endif  // CONFIG_SOC_SPI_PERIPH_NUM > 2
+    if (SPI_MOSI_MISO != TasmotaGlobal.spi_enabled) {
+#ifndef FIRMWARE_MINIMAL
+      AddLog(LOG_LEVEL_DEBUG_MORE, PSTR(D_LOG_ETH "No SPI bus1 GPIO defined"));
+#endif // FIRMWARE_MINIMAL
+      return;
+    }
+#ifndef FIRMWARE_MINIMAL
+    AddLog(LOG_LEVEL_INFO, PSTR(D_LOG_ETH "Ethernet using SPI (bus%d)"), spi_bus +1);
+#endif // FIRMWARE_MINIMAL
+    init_ok = (ETH.begin((eth_phy_type_t)eth_type, Settings->eth_address,
+                         eth_mdc, eth_mdio, eth_power,
+#if CONFIG_SOC_SPI_PERIPH_NUM > 2 
+                         (1 == spi_bus) ? SPI3_HOST : SPI2_HOST,
+#else
+                         SPI2_HOST,
+#endif
+                         Pin(GPIO_SPI_CLK, spi_bus), Pin(GPIO_SPI_MISO, spi_bus), Pin(GPIO_SPI_MOSI, spi_bus)));
   }
   if (!init_ok) {
-    AddLog(LOG_LEVEL_DEBUG, PSTR(D_LOG_ETH "Bad EthType or init error"));
+    AddLog(LOG_LEVEL_DEBUG, PSTR(D_LOG_ETH "Bad EthType %i or init error"),eth_type);
     return;
   };
 
@@ -377,7 +413,7 @@ void CmndEthernet(void) {
 }
 
 void CmndEthAddress(void) {
-  if ((XdrvMailbox.payload >= 0) && (XdrvMailbox.payload <= 31)) {
+  if ((XdrvMailbox.payload >= -1) && (XdrvMailbox.payload <= 31)) {
     Settings->eth_address = XdrvMailbox.payload;
     TasmotaGlobal.restart_flag = 2;
   }

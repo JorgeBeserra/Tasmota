@@ -61,10 +61,10 @@ const uint8_t MAX_PWMS_LEGACY = 5;          // Max number of PWM channels in fir
 #ifdef ESP32                                // Max number of PWM channels (total including extended) - ESP32 only
   #if CONFIG_IDF_TARGET_ESP32
   const uint8_t MAX_PWMS = 16;              // ESP32: 16 ledc PWM channels in total - TODO for now
-  #elif CONFIG_IDF_TARGET_ESP32S2 || CONFIG_IDF_TARGET_ESP32S3
-  const uint8_t MAX_PWMS = 8;               // ESP32S2/S3: 8 ledc PWM channels in total
-  #elif CONFIG_IDF_TARGET_ESP32C2 || CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C6
-  const uint8_t MAX_PWMS = 6;               // ESP32C2/C3/C6: 6 ledc PWM channels in total
+  #elif CONFIG_IDF_TARGET_ESP32S2 || CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32S31
+  const uint8_t MAX_PWMS = 8;               // ESP32S2/S3/S31: 8 ledc PWM channels in total
+  #elif CONFIG_IDF_TARGET_ESP32C2 || CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32C5 || CONFIG_IDF_TARGET_ESP32C6 || CONFIG_IDF_TARGET_ESP32C61
+  const uint8_t MAX_PWMS = 6;               // ESP32C2/C3/C6/C61: 6 ledc PWM channels in total
   #else
   const uint8_t MAX_PWMS = 5;               // Unknown - revert to 5 PWM max
   #endif
@@ -81,7 +81,7 @@ const uint8_t MAX_KNX_CB = 10;              // Max number of KNX Group Addresses
 const uint8_t MAX_XNRG_DRIVERS = 32;        // Max number of allowed energy drivers
 const uint8_t MAX_XDRV_DRIVERS = 128;       // Max number of allowed driver drivers
 const uint8_t MAX_XSNS_DRIVERS = 128;       // Max number of allowed sensor drivers
-const uint8_t MAX_I2C_DRIVERS = 96;         // Max number of allowed i2c drivers
+const uint8_t MAX_I2C_DRIVERS = 160;        // Max number of allowed i2c drivers
 const uint8_t MAX_SHUTTERS = 4;             // Max number of shutters
 const uint8_t MAX_SHUTTER_KEYS = 4;         // Max number of shutter keys or buttons
 const uint8_t MAX_PCF8574 = 4;              // Max number of PCF8574 devices
@@ -99,13 +99,38 @@ const uint8_t MAX_SPI = 2;                  // Max number of Hardware SPI contro
 
 // I2S
 #ifdef SOC_I2S_SUPPORTED
+  #ifndef SOC_I2S_NUM  // IDF 6.x: SOC_I2S_NUM removed
+    #ifdef CONFIG_IDF_TARGET_ESP32P4
+      #define SOC_I2S_NUM 3
+    #elif CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32S31
+      #define SOC_I2S_NUM 2
+    #else
+      #define SOC_I2S_NUM 1   
+    #endif
+  #endif
   const uint8_t MAX_I2S = SOC_I2S_NUM;
 #else  // SOC_I2S_SUPPORTED
   const uint8_t MAX_I2S = 0;
 #endif // SOC_I2S_SUPPORTED
 
 // RMT
-#ifdef SOC_RMT_SUPPORTED
+#ifdef SOC_RMT_SUPPORTED  // IDF 6.x:  SOC_RMT_SUPPORTED removed
+  #ifndef SOC_RMT_TX_CANDIDATES_PER_GROUP
+    #ifdef CONFIG_IDF_TARGET_ESP32
+      #define SOC_RMT_TX_CANDIDATES_PER_GROUP 8
+    #elif CONFIG_IDF_TARGET_ESP32S3
+      #define SOC_RMT_TX_CANDIDATES_PER_GROUP 4
+    #elif CONFIG_IDF_TARGET_ESP32P4
+      #define SOC_RMT_TX_CANDIDATES_PER_GROUP 4
+    #elif CONFIG_IDF_TARGET_ESP32S31
+      #define SOC_RMT_TX_CANDIDATES_PER_GROUP 8
+    #else
+      #define SOC_RMT_TX_CANDIDATES_PER_GROUP 2
+    #endif
+  #endif
+  #ifndef SOC_RMT_GROUPS  // IDF 6.x: removed
+    #define SOC_RMT_GROUPS 1
+  #endif
   const uint8_t MAX_RMT = (SOC_RMT_GROUPS) * (SOC_RMT_TX_CANDIDATES_PER_GROUP);
 #else // SOC_RMT_SUPPORTED
   const uint8_t MAX_RMT = 0;
@@ -133,8 +158,12 @@ const uint8_t MAX_ADCS = 1;                 // Max number of ESP8266 ADC pins
 const uint8_t MAX_SWITCHES_TXT = 8;         // Max number of switches user text
 #endif  // ESP8266
 #ifdef ESP32
-  #if CONFIG_IDF_TARGET_ESP32C2 || CONFIG_IDF_TARGET_ESP32C3
+  #if CONFIG_IDF_TARGET_ESP32C61
+  const uint8_t MAX_ADCS = 4;               // Max number of ESP32-C61 ADC pins (ADC1_CH0..3)
+  #elif CONFIG_IDF_TARGET_ESP32C2 || CONFIG_IDF_TARGET_ESP32C3
   const uint8_t MAX_ADCS = 5;               // Max number of ESP32-C3 ADC pins (ADC2 pins are unusable with Wifi enabled)
+  #elif CONFIG_IDF_TARGET_ESP32C5
+  const uint8_t MAX_ADCS = 6;               // Max number of ESP32 ADC pins (ADC2 pins are unusable with Wifi enabled)  
   #elif CONFIG_IDF_TARGET_ESP32C6
   const uint8_t MAX_ADCS = 7;               // Max number of ESP32 ADC pins (ADC2 pins are unusable with Wifi enabled)
   #else   // ESP32
@@ -345,6 +374,8 @@ const uint32_t LOOP_SLEEP_DELAY = 50;       // Lowest number of milliseconds to 
 #define SOC_TOUCH_VERSION_1
 #elif SOC_TOUCH_SENSOR_VERSION == 2  // ESP32S2, ESP32S3
 #define SOC_TOUCH_VERSION_2
+#elif SOC_TOUCH_SENSOR_VERSION == 3  // ESP32S31
+#define SOC_TOUCH_VERSION_3
 #endif  // SOC_TOUCH_SENSOR_VERSION
 #endif  // ESP32
 
@@ -380,11 +411,23 @@ enum SwitchModeOptions {TOGGLE,                              // 0
 
 enum LedStateOptions {LED_OFF, LED_POWER, LED_MQTTSUB, LED_POWER_MQTTSUB, LED_MQTTPUB, LED_POWER_MQTTPUB, LED_MQTT, LED_POWER_MQTT, MAX_LED_OPTION};
 
-enum EmulationOptions {EMUL_NONE, EMUL_WEMO, EMUL_HUE, EMUL_MAX};
+enum EmulationOptions {EMUL_NONE, EMUL_WEMO, EMUL_HUE, EMUL_SHELLY, EMUL_MAX};
 
 enum TopicOptions { CMND, STAT, TELE, nu1, RESULT_OR_CMND, RESULT_OR_STAT, RESULT_OR_TELE };
 
-enum UploadTypes { UPL_TASMOTA = 1, UPL_SETTINGS, UPL_EFM8BB1, UPL_TASMOTACLIENT, UPL_EFR32, UPL_SHD, UPL_CCL, UPL_UFSFILE };
+// Upload type used by HandleUploadLoop() to route incoming data.
+// Value 0 is invalid/unset. Each upload endpoint must set the appropriate
+// type before HandleUploadLoop() processes the first data block.
+// UPL_NONE           - No valid type
+// UPL_TASMOTA        - OTA firmware update (/u2)
+// UPL_SETTINGS       - Settings backup restore (/u2)
+// UPL_EFM8BB1        - Sonoff RF bridge EFM8BB1 firmware
+// UPL_TASMOTACLIENT  - Tasmota client (Arduino) hex file
+// UPL_EFR32          - Zigbee EZSP (EFR32) firmware
+// UPL_SHD            - Shelly dimmer firmware
+// UPL_CCL            - CC2530 Zigbee firmware via CCLoader
+// UPL_UFSFILE        - Filesystem file upload (/ufsu)
+enum UploadTypes { UPL_NONE, UPL_TASMOTA, UPL_SETTINGS, UPL_EFM8BB1, UPL_TASMOTACLIENT, UPL_EFR32, UPL_SHD, UPL_CCL, UPL_UFSFILE };
 
 enum ExecuteCommandPowerOptions { POWER_OFF, POWER_ON, POWER_TOGGLE, POWER_BLINK, POWER_BLINK_STOP, POWER_OFF_FORCE,
                                   POWER_OFF_NO_STATE = 8, POWER_ON_NO_STATE, POWER_TOGGLE_NO_STATE,
@@ -428,7 +471,7 @@ enum Ws2812Color { WS_RED, WS_GREEN, WS_BLUE };
 
 enum LightSubtypes { LST_NONE, LST_SINGLE, LST_COLDWARM, LST_RGB,   LST_RGBW, LST_RGBCW, LST_MAX=5 };   // Do not insert new fields
 enum LightTypes    { LT_BASIC, LT_PWM1,    LT_PWM2,      LT_PWM3,   LT_PWM4,  LT_PWM5,  LT_PWM6, LT_PWM7,
-                     LT_NU8,   LT_SERIAL1, LT_SERIAL2,   LT_RGB,    LT_RGBW,  LT_RGBWC, LT_NU14, LT_NU15 };  // Do not insert new fields
+                     LT_NU8,   LT_W,       LT_CW,        LT_RGB,    LT_RGBW,  LT_RGBWC, LT_NU14, LT_NU15 };  // Do not insert new fields
 
 enum XsnsFunctions { FUNC_SETTINGS_OVERRIDE, FUNC_SETUP_RING1, FUNC_SETUP_RING2, FUNC_PRE_INIT, FUNC_INIT, FUNC_ACTIVE, FUNC_ABOUT_TO_RESTART,
                      FUNC_LOOP, FUNC_SLEEP_LOOP, FUNC_EVERY_50_MSECOND, FUNC_EVERY_100_MSECOND, FUNC_EVERY_200_MSECOND, FUNC_EVERY_250_MSECOND, FUNC_EVERY_SECOND,
@@ -442,6 +485,7 @@ enum XsnsFunctions { FUNC_SETTINGS_OVERRIDE, FUNC_SETUP_RING1, FUNC_SETUP_RING2,
                      FUNC_WEB_GET_ARG, FUNC_WEB_ADD_HANDLER, FUNC_SET_SCHEME, FUNC_HOTPLUG_SCAN, FUNC_TIME_SYNCED,
                      FUNC_DEVICE_GROUP_ITEM,
                      FUNC_NETWORK_UP, FUNC_NETWORK_DOWN,
+                     FUNC_WEB_STATUS_LEFT, FUNC_WEB_STATUS_RIGHT,
                      FUNC_return_result = 200,  // Insert function WITHOUT return results before here. Following functions return results
                      FUNC_PIN_STATE, FUNC_MODULE_INIT, FUNC_ADD_BUTTON, FUNC_ADD_SWITCH, FUNC_BUTTON_PRESSED, FUNC_BUTTON_MULTI_PRESSED,
                      FUNC_SET_DEVICE_POWER,
@@ -493,6 +537,7 @@ enum SettingsTextIndex { SET_OTAURL,
                          SET_INFLUXDB_HOST, SET_INFLUXDB_PORT, SET_INFLUXDB_ORG, SET_INFLUXDB_TOKEN, SET_INFLUXDB_BUCKET, SET_INFLUXDB_RP,
                          SET_CANVAS,
                          SET_TELEGRAM_FINGERPRINT,
+                         SET_APBSSID1, SET_APBSSID2,  // MAX_SSIDS
                          SET_MAX, // limit of texts stored in Settings
                          // Index above are not stored in Settings and should be handled specifically in SettingText()
                          SET_BUTTON17, SET_BUTTON18, SET_BUTTON19, SET_BUTTON20, SET_BUTTON21, SET_BUTTON22, SET_BUTTON23, SET_BUTTON24,
@@ -501,6 +546,8 @@ enum SettingsTextIndex { SET_OTAURL,
                          };
 
 enum SpiInterfaces { SPI_NONE, SPI_MOSI, SPI_MISO, SPI_MOSI_MISO };
+
+enum XYZModemProtocols { TXMP_NONE, TXMP_SERIAL, TXMP_TASCONSOLE, TXMP_TELNET };
 
 enum DevGroupMessageType { DGR_MSGTYP_FULL_STATUS, DGR_MSGTYP_PARTIAL_UPDATE, DGR_MSGTYP_UPDATE, DGR_MSGTYP_UPDATE_MORE_TO_COME, DGR_MSGTYP_UPDATE_DIRECT, DGR_MSGTYPE_UPDATE_COMMAND, DGR_MSGTYPFLAG_WITH_LOCAL = 128 };
 

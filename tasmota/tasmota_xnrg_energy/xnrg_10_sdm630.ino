@@ -318,10 +318,13 @@ void SDM630Every250ms(void)
 
 void Sdm630SnsInit(void)
 {
-  Sdm630Modbus = new TasmotaModbus(Pin(GPIO_SDM630_RX), Pin(GPIO_SDM630_TX), Pin(GPIO_NRG_MBS_TX_ENA));
+  Sdm630Modbus = new TasmotaModbus(Pin(GPIO_SDM630_RX), Pin(GPIO_SDM630_TX), Pin(GPIO_NRG_MBS_TX_ENA), Pin(GPIO_MBS_RX_ENA));
   uint8_t result = Sdm630Modbus->Begin(SDM630_SPEED);
   if (result) {
     if (2 == result) { ClaimSerial(); }
+#ifdef ESP32
+    AddLog(LOG_LEVEL_DEBUG, PSTR("SDM: Serial UART%d"), Sdm630Modbus->getUart());
+#endif
     Energy->phase_count = 3;
     Energy->frequency_common = true;             // Use common frequency
   } else {

@@ -116,9 +116,12 @@ typedef struct OT_BOILER_STATUS_T
     float m_flame_modulation_read;
     // Boiler Temperature
     float m_boiler_temperature_read;
+    // CH2 flow water temperature
+    float m_boiler2_temperature_read;
 
     // Boiler desired values
     float m_boilerSetpoint;
+    float m_boilerSetpoint2;
     float m_hotWaterSetpoint;
     // This flag is set when Master require a CH to be on
     // and forces the OpenThermMessageID::TSet to be sent to the boiler
@@ -162,6 +165,8 @@ void sns_opentherm_init_boiler_status()
     sns_ot_boiler_status.m_enableCentralHeating2 = Settings->ot_flags & (uint8_t)OpenThermSettingsFlags::EnableCentralHeating2;
 
     sns_ot_boiler_status.m_boilerSetpoint = (float)Settings->ot_boiler_setpoint;
+    // CH2 has no own setting, it starts with the CH setpoint
+    sns_ot_boiler_status.m_boilerSetpoint2 = (float)Settings->ot_boiler_setpoint;
     sns_ot_boiler_status.m_hotWaterSetpoint = (float)Settings->ot_hot_water_setpoint;
 
     sns_ot_boiler_status.m_fault_code = 0;
@@ -191,7 +196,7 @@ void sns_opentherm_processResponseCallback(unsigned long response, int st)
 
     switch (status)
     {
-    case OpenThermResponseStatus::OPTH_SUCCESS:
+    case OpenThermResponseStatus::SUCCESS:
         if (sns_ot_master->isValidResponse(response))
         {
             sns_opentherm_process_success_response(&sns_ot_boiler_status, response);
@@ -200,7 +205,7 @@ void sns_opentherm_processResponseCallback(unsigned long response, int st)
         sns_ot_timeout_before_disconnect = SNS_OT_MAX_TIMEOUTS_BEFORE_DISCONNECT;
         break;
 
-    case OpenThermResponseStatus::OPTH_INVALID:
+    case OpenThermResponseStatus::INVALID:
         sns_opentherm_check_retry_request();
         sns_ot_connection_status = OpenThermConnectionStatus::OTC_READY;
         sns_ot_timeout_before_disconnect = SNS_OT_MAX_TIMEOUTS_BEFORE_DISCONNECT;
@@ -210,7 +215,7 @@ void sns_opentherm_processResponseCallback(unsigned long response, int st)
     // In this case we do reconnect.
     // If this command will timeout multiple times, it will be excluded from the rotation later on
     // after couple of failed attempts. See sns_opentherm_check_retry_request logic
-    case OpenThermResponseStatus::OPTH_TIMEOUT:
+    case OpenThermResponseStatus::TIMEOUT:
         sns_opentherm_check_retry_request();
         if (--sns_ot_timeout_before_disconnect == 0)
         {
@@ -276,9 +281,22 @@ void sns_opentherm_stat(bool json)
                         (int)sns_ot_boiler_status.m_boiler_temperature_read,
                         (int)sns_ot_boiler_status.m_boilerSetpoint);
 
+        if (sns_ot_boiler_status.m_enableCentralHeating2)
+        {
+            WSContentSend_P(PSTR("{s}Boiler2 Temp/Setpnt{m}%d / %d{e}"),
+                            (int)sns_ot_boiler_status.m_boiler2_temperature_read,
+                            (int)sns_ot_boiler_status.m_boilerSetpoint2);
+        }
+
         if (OpenTherm::isCentralHeatingActive(sns_ot_boiler_status.m_slave_raw_status))
         {
             WSContentSend_P(PSTR("{s}Central Heating is ACTIVE{m}{e}"));
+        }
+
+        // Slave status bit 5 = CH2 mode (the library has no helper for it)
+        if (sns_ot_boiler_status.m_slave_raw_status & 0x20)
+        {
+            WSContentSend_P(PSTR("{s}Central Heating 2 is ACTIVE{m}{e}"));
         }
 
         if (sns_ot_boiler_status.m_enableHotWater)
@@ -326,8 +344,8 @@ void sns_ot_start_handshake()
 
     sns_opentherm_protocol_reset();
 
-    sns_ot_master->sendRequestAync(
-        OpenTherm::buildRequest(OpenThermMessageType::OPTH_READ_DATA, OpenThermMessageID::SConfigSMemberIDcode, 0));
+    sns_ot_master->sendRequestAsync(
+        OpenTherm::buildRequest(OpenThermMessageType::READ_DATA, OpenThermMessageID::SConfigSMemberIDcode, 0));
 
     sns_ot_connection_status = OpenThermConnectionStatus::OTC_HANDSHAKE;
 }
@@ -335,8 +353,7 @@ void sns_ot_start_handshake()
 void sns_ot_process_handshake(unsigned long response, int st)
 {
     OpenThermResponseStatus status = (OpenThermResponseStatus)st;
-
-    if (status != OpenThermResponseStatus::OPTH_SUCCESS || !sns_ot_master->isValidResponse(response))
+    if (status != OpenThermResponseStatus::SUCCESS || !sns_ot_master->isValidResponse(response))
     {
         AddLog(LOG_LEVEL_ERROR,
                   PSTR("[OTH]: getSlaveConfiguration failed. Status=%s"),
@@ -449,6 +466,8 @@ uint8_t sns_opentherm_read_flags(char *data, uint32_t len)
 #define D_PRFX_OTHERM "ot_"
 // set the boiler temperature (CH). Sutable for the PID app.
 // After restart will use the defaults from the settings
+// ot_tboiler2 sets the 2nd CH circuit (OT ID 8, needs flag CH2). It is not saved,
+// after restart CH2 starts with the CH setpoint
 #define D_CMND_OTHERM_BOILER_SETPOINT "tboiler"
 // set hot water (DHW) temperature. Do not write it in the flash memory.
 // suitable for the temporary changes
@@ -473,6 +492,7 @@ uint8_t sns_opentherm_read_flags(char *data, uint32_t len)
 // Please note, if you set it to "0" and EnableCentralHeatingOnDiagnostics is set
 // boiler will follow the Diagnostics bit and won't turn CH off. When Diagnostics bit cleared,
 // and "ot_ch" is "1", boiler will keep heating
+// "ot_ch2" does the same for m_enableCentralHeating2 (EnableCentralHeating2 flag)
 #define D_CMND_SET_CENTRAL_HEATING_ENABLED "ch"
 
 // Get/Set boiler status m_enableHotWater value. It's equivalent of the EnableHotWater settings
@@ -498,11 +518,19 @@ void sns_opentherm_cmd(void) { }
 void sns_opentherm_boiler_setpoint_cmd(void)
 {
     bool query = strlen(XdrvMailbox.data) == 0;
+    float *setpoint = (2 == XdrvMailbox.index) ? &sns_ot_boiler_status.m_boilerSetpoint2 : &sns_ot_boiler_status.m_boilerSetpoint;
     if (!query)
     {
-        sns_ot_boiler_status.m_boilerSetpoint = CharToFloat(XdrvMailbox.data);
+        *setpoint = CharToFloat(XdrvMailbox.data);
     }
-    ResponseCmndFloat(sns_ot_boiler_status.m_boilerSetpoint, Settings->flag2.temperature_resolution);
+    if (2 == XdrvMailbox.index)
+    {
+        ResponseCmndIdxFloat(*setpoint, Settings->flag2.temperature_resolution);
+    }
+    else
+    {
+        ResponseCmndFloat(*setpoint, Settings->flag2.temperature_resolution);
+    }
 }
 
 void sns_opentherm_hot_water_setpoint_cmd(void)
@@ -549,11 +577,20 @@ void sns_opentherm_flags_cmd(void)
 void sns_opentherm_set_central_heating_cmd(void)
 {
     bool query = strlen(XdrvMailbox.data) == 0;
+    // "ot_ch2" arrives here as "ch" with index 2 (Tasmota splits trailing digits)
+    bool *enable = (2 == XdrvMailbox.index) ? &sns_ot_boiler_status.m_enableCentralHeating2 : &sns_ot_boiler_status.m_enableCentralHeating;
     if (!query)
     {
-        sns_ot_boiler_status.m_enableCentralHeating = atoi(XdrvMailbox.data);
+        *enable = atoi(XdrvMailbox.data);
     }
-    ResponseCmndNumber(sns_ot_boiler_status.m_enableCentralHeating ? 1 : 0);
+    if (2 == XdrvMailbox.index)
+    {
+        ResponseCmndIdxNumber(*enable ? 1 : 0);
+    }
+    else
+    {
+        ResponseCmndNumber(*enable ? 1 : 0);
+    }
 }
 
 void sns_opentherm_set_hot_water_cmd(void)
@@ -609,7 +646,7 @@ bool Xsns69(uint32_t function)
             unsigned long request = sns_opentherm_get_next_request(&sns_ot_boiler_status);
             if (-1 != request)
             {
-                sns_ot_master->sendRequestAync(request);
+                sns_ot_master->sendRequestAsync(request);
                 sns_ot_connection_status = OpenThermConnectionStatus::OTC_INFLIGHT;
             }
         }

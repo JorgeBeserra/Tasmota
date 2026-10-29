@@ -17,6 +17,93 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 
+#################################################################################
+# Matter 1.4.1 Device Specification - Generic Switch (0x000F)
+#################################################################################
+# Device Type: Generic Switch (0x000F)
+# Device Type Revision: 3 (Matter 1.4.1 Device Library)
+# Class: Simple | Scope: Endpoint
+#
+# CLUSTERS (Server):
+# - 0x003B: Switch (M) - Switch state and events
+# - 0x0003: Identify (M) - Device identification
+# - 0x001D: Descriptor (M) - Inherited from base class
+#
+# NOTES:
+# - Maps Tasmota Button<x> to Matter Generic Switch
+# - Supports multi-press detection (up to 5 presses)
+# - Event-driven architecture for button state changes
+# - Typical applications: wall switches, remote controls, button panels
+#################################################################################
+
+#################################################################################
+# Matter 1.4.1 Switch Cluster (0x003B)
+#################################################################################
+# Cluster Revision: 2 (Matter 1.4.1)
+# Role: Application | Scope: Endpoint
+#
+# FEATURES (Tasmota Implementation):
+# - Bit 1 (MS): MomentarySwitch - Momentary button (M)
+# - Bit 2 (MSR): MomentarySwitchRelease - Release detection (M)
+# - Bit 4 (MSM): MomentarySwitchMultiPress - Multi-press detection (M)
+# - FeatureMap = 0x16 (bits 1,2,4 = 22 decimal)
+#
+# ATTRIBUTES:
+# ID     | Name              | Type  | Constraint | Quality | Default | Access | Conf
+# -------|-------------------|-------|------------|---------|---------|--------|-----
+# 0x0000 | NumberOfPositions | uint8 | min 2      | F       | 2       | R V    | M
+# 0x0001 | CurrentPosition   | uint8 | 0-(Number- | -       | 0       | R V    | M
+#        |                   |       | OfPositions|         |         |        |
+#        |                   |       | -1)        |         |         |        |
+# 0x0002 | MultiPressMax     | uint8 | min 2      | F       | 2       | R V    | MSM
+#
+# Quality Flags:
+# - F: Fixed (cannot be changed)
+#
+# Access Control:
+# - R: Read
+# - V: View privilege required
+#
+# EVENTS:
+# ID   | Name              | Priority | Access | Conf
+# -----|-------------------|----------|--------|-----
+# 0x01 | InitialPress      | INFO     | V      | MS
+# 0x03 | ShortRelease      | INFO     | V      | MSR
+# 0x05 | MultiPressOngoing | INFO     | V      | MSM
+# 0x06 | MultiPressComplete| INFO     | V      | MSM
+#
+# Event Fields:
+# - InitialPress: {NewPosition:uint8}
+# - ShortRelease: {PreviousPosition:uint8}
+# - MultiPressOngoing: {NewPosition:uint8, CurrentNumberOfPressesCounted:uint8}
+# - MultiPressComplete: {PreviousPosition:uint8, TotalNumberOfPressesCounted:uint8}
+#
+# TASMOTA IMPLEMENTATION:
+# - Maps to Tasmota Button<x> input
+# - NumberOfPositions: 2 (pressed/released)
+# - MultiPressMax: 5 (supports up to penta-press)
+# - Button events trigger Matter events:
+#   * Button press → InitialPress event
+#   * Button release → ShortRelease event
+#   * Multi-press ongoing → MultiPressOngoing event
+#   * Multi-press complete → MultiPressComplete event
+#
+# BUTTON HANDLER MODES:
+# - mode=0: Static report every second (position update)
+# - mode=1: Button state changed (immediate event)
+# - mode=2: Multi-press status (delayed event)
+#
+# CONFIGURATION:
+# - ARG: "button" - Tasmota Button number (1-based)
+# - Example: button=1 uses Button1 input
+#
+# TYPICAL USAGE:
+# - Wall switches for lighting control
+# - Scene activation buttons
+# - Remote control buttons
+# - Multi-function button panels
+#################################################################################
+
 # Matter plug-in for core behavior
 
 #@ solidify:Matter_Plugin_Sensor_GenericSwitch_Btn,weak
@@ -24,9 +111,12 @@
 class Matter_Plugin_Sensor_GenericSwitch_Btn : Matter_Plugin_Device
   static var TYPE = "gensw_btn"                     # name of the plug-in in json
   static var DISPLAY_NAME = "Generic Switch/Button" # display name of the plug-in
-  static var ARG  = "button"                        # additional argument name (or empty if none)
-  static var ARG_HINT = "Button<x> number"
-  static var ARG_TYPE = / x -> int(x)               # function to convert argument to the right type
+
+  static var SCHEMA = "button|"                     # arg name
+                      "l:Button|"                    # label (display name)
+                      "t:i|"                        # type: int
+                      "h:Button<x> number|"         # hint
+                      "r:1"                         # required
   # static var UPDATE_TIME = 750                      # update every 750ms    - TODO still necessary?
   static var CLUSTERS  = matter.consolidate_clusters(_class, {
     # 0x001D: inherited                             # Descriptor Cluster 9.5 p.453
@@ -36,7 +126,7 @@ class Matter_Plugin_Sensor_GenericSwitch_Btn : Matter_Plugin_Device
     # 0x0005: [0,1,2,3,4,5],                          # Scenes 1.4 p.30 - no writable
     0x003B: [0, 1, 2],                              # Switch 1.12
   })
-  static var TYPES = { 0x000F: 2 }                  # Generic Switch, rev 2
+  static var TYPES = { 0x000F: 3 }                  # Generic Switch - Matter 1.4.1 Device Library Rev 3
 
   var tasmota_switch_index                          # Switch number in Tasmota (one based)
   var shadow_position
@@ -47,26 +137,18 @@ class Matter_Plugin_Sensor_GenericSwitch_Btn : Matter_Plugin_Device
   # Parse configuration map
   def parse_configuration(config)
     super(self).parse_configuration(config)
-    self.tasmota_switch_index = int(config.find(self.ARG #-'relay'-#, 1))
+    self.tasmota_switch_index = int(config.find('button', 1))
     if self.tasmota_switch_index <= 0    self.tasmota_switch_index = 1    end
+    self.shadow_position = 0             # CurrentPosition is not nullable
   end
-
-  #############################################################
-  # Update shadow
-  #
-  # def update_shadow()
-  #   super(self).update_shadow()
-  #   self.shadow_position = false
-  #   # TODO
-  # end
 
   #############################################################
   # Model
   #
   def set_position(position)
     if position != self.shadow_position
-      self.attribute_updated(0x003B, 0x0001)
       self.shadow_position = position
+      self.attribute_updated(0x003B, 0x0001)
     end
   end
 
@@ -74,7 +156,6 @@ class Matter_Plugin_Sensor_GenericSwitch_Btn : Matter_Plugin_Device
   # read an attribute
   #
   def read_attribute(session, ctx, tlv_solo)
-    var TLV = matter.TLV
     var cluster = ctx.cluster
     var attribute = ctx.attribute
 
@@ -82,14 +163,20 @@ class Matter_Plugin_Sensor_GenericSwitch_Btn : Matter_Plugin_Device
     if   cluster == 0x003B              # ========== Generic Switch, 1.12 ==========
     #   self.update_shadow_lazy()
       if   attribute == 0x0000          #  ---------- NumberOfPositions / uint8 ----------
-        return tlv_solo.set(TLV.U1, 2)  # default to 2 positions
+        return tlv_solo.set(0x06 #-TLV.U4-#, 2)  # default to 2 positions
       elif attribute == 0x0001          #  ---------- CurrentPosition / uint8 ----------
-        return tlv_solo.set_or_nil(TLV.U1, self.shadow_position)
+        return tlv_solo.set(0x06 #-TLV.U4-#, self.shadow_position)
       elif attribute == 0x0002          #  ---------- MultiPressMax / uint8 ----------
-        return tlv_solo.set(TLV.U1, 5)  # up to penta press
+        return tlv_solo.set(0x06 #-TLV.U4-#, 5)  # up to penta press
 
+      elif attribute == 0xFFFA          #  ---------- EventList ----------
+        var events = matter.TLV.Matter_TLV_array()
+        for event_id : [0x01, 0x03, 0x05, 0x06]
+          events.add_TLV(nil, 0x06 #-TLV.U4-#, event_id)
+        end
+        return events
       elif attribute == 0xFFFC          #  ---------- FeatureMap / map32 ----------
-        return tlv_solo.set(TLV.U4, 0x16 #-0x02 | 0x04 | 0x10-#)    # MomentarySwitch + MomentarySwitchRelease + MomentarySwitchMultiPress
+        return tlv_solo.set(0x06 #-TLV.U4-#, 0x16 #-0x02 | 0x04 | 0x10-#)    # MomentarySwitch + MomentarySwitchRelease + MomentarySwitchMultiPress
       end
 
     end
@@ -102,9 +189,9 @@ class Matter_Plugin_Sensor_GenericSwitch_Btn : Matter_Plugin_Device
   # Output the current state in JSON
   # New values need to be appended with `,"key":value` (including prefix comma)
   #
-  # Override the default behavior to use the key `OnOff` instead of `Power`
+  # Report the current button position.
   def append_state_json()
-    return f',"Switch":{int(self.shadow_onoff)}'
+    return f',"Switch":{self.shadow_position}'
   end
 
   #####################################################################
@@ -115,6 +202,7 @@ class Matter_Plugin_Sensor_GenericSwitch_Btn : Matter_Plugin_Device
   #   - mode: (int) 0=static report every second, 1=button state changed (immediate), 2=multi-press status (delayed)
   #   - state: 1=button pressed, 0=button released, 2..5+=multi-press complete
   def button_handler(button, mode, state, press_counter)
+    if button != self.tasmota_switch_index return end
     # if tasmota.loglevel(3) && (mode != 0)      # only if actual action
     #   log(f"MTR: button_event {button}/{mode}:{state}", 3)
     # end
@@ -125,19 +213,19 @@ class Matter_Plugin_Sensor_GenericSwitch_Btn : Matter_Plugin_Device
     # publish event for (mode==1), InitialPress and ShortRelease
     if (mode == 1)
       if state              # InitialPress
-        self.publish_event(0x003B, 0x01, matter.EVENT_INFO, matter.TLV.Matter_TLV_item().set(matter.TLV.U1, 1))   # InitialPress, position hardcoded to 1
+        self.publish_event(0x003B, 0x01, 1 #-matter.EVENT_INFO-#, matter.TLV.Matter_TLV_item().set(0x06 #-matter.TLV.U4-#, 1))   # InitialPress, position hardcoded to 1
       else
-        self.publish_event(0x003B, 0x03, matter.EVENT_INFO, matter.TLV.Matter_TLV_item().set(matter.TLV.U1, 1))   # ShortRelease, previous position hardcoded to 1
+        self.publish_event(0x003B, 0x03, 1 #-matter.EVENT_INFO-#, matter.TLV.Matter_TLV_item().set(0x06 #-matter.TLV.U4-#, 1))   # ShortRelease, previous position hardcoded to 1
       end
       # check if there is an ungoing multi-press
       if (state == 1) && (press_counter > 0)
         # MultiPressOngoing
-        self.publish_event(0x003B, 0x05, matter.EVENT_INFO, matter.TLV.Matter_TLV_item().set(matter.TLV.U1, 1),
-                                                            matter.TLV.Matter_TLV_item().set(matter.TLV.U1, press_counter + 1))   # MultiPressCom­ plete
+        self.publish_event(0x003B, 0x05, 1 #-matter.EVENT_INFO-#, matter.TLV.Matter_TLV_item().set(0x06 #-matter.TLV.U4-#, 1),
+                                                            matter.TLV.Matter_TLV_item().set(0x06 #-matter.TLV.U4-#, press_counter + 1))   # MultiPressCom­ plete
       end
     elif (mode == 2) && (press_counter > 0)       # Multipress
-      self.publish_event(0x003B, 0x06, matter.EVENT_INFO, matter.TLV.Matter_TLV_item().set(matter.TLV.U1, 1),
-                                                          matter.TLV.Matter_TLV_item().set(matter.TLV.U1, press_counter))   # MultiPressCom­ plete
+      self.publish_event(0x003B, 0x06, 1 #-matter.EVENT_INFO-#, matter.TLV.Matter_TLV_item().set(0x06 #-matter.TLV.U4-#, 1),
+                                                          matter.TLV.Matter_TLV_item().set(0x06 #-matter.TLV.U4-#, press_counter))   # MultiPressCom­ plete
     end
   end
 

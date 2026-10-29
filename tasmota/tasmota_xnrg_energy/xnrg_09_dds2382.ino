@@ -90,10 +90,13 @@ void Dds2382EverySecond(void)
 
 void Dds2382SnsInit(void)
 {
-  Dds2382Modbus = new TasmotaModbus(Pin(GPIO_DDS2382_RX), Pin(GPIO_DDS2382_TX), Pin(GPIO_NRG_MBS_TX_ENA));
+  Dds2382Modbus = new TasmotaModbus(Pin(GPIO_DDS2382_RX), Pin(GPIO_DDS2382_TX), Pin(GPIO_NRG_MBS_TX_ENA), Pin(GPIO_MBS_RX_ENA));
   uint8_t result = Dds2382Modbus->Begin(DDS2382_SPEED);
   if (result) {
     if (2 == result) { ClaimSerial(); }
+#ifdef ESP32
+    AddLog(LOG_LEVEL_DEBUG, PSTR("DDS: Serial UART%d"), Dds2382Modbus->getUart());
+#endif
   } else {
     TasmotaGlobal.energy_driver = ENERGY_NONE;
   }

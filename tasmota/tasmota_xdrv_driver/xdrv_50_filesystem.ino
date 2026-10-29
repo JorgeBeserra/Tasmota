@@ -87,6 +87,8 @@ ftp       start stop ftp server: 0 = OFF, 1 = SDC, 2 = FlashFile
 #endif  // ESP32
 */
 
+const int UFS_FILENAME_SIZE = 50;
+
 // Global file system pointer
 FS *ufsp;
 // Flash file system pointer
@@ -94,7 +96,7 @@ FS *ffsp;
 // Local pointer for file managment
 FS *dfsp;
 
-char ufs_path[48];
+char ufs_path[UFS_FILENAME_SIZE];
 File ufs_upload_file;
 uint8_t ufs_dir;
 // 0 = None, 1 = SD, 2 = ffat, 3 = littlefs
@@ -104,7 +106,7 @@ uint8_t ffs_type;
 uint8_t sd_type;
 
 struct {
-  char run_file[48];
+  char run_file[UFS_FILENAME_SIZE];
   int run_file_pos = -1;
   bool run_file_mutex = 0;
   bool download_busy;
@@ -192,17 +194,33 @@ char *fileOnly(char *fname){
 void UfsCheckSDCardInit(void) {
   // Try SPI mode first
   // SPI mode requires SDCARD_CS to be configured
+/*
   if (TasmotaGlobal.spi_enabled && PinUsed(GPIO_SDCARD_CS)) {
     int8_t cs = Pin(GPIO_SDCARD_CS);
+*/
+  uint32_t spi_bus = 0;
+  int8_t cs = -1;
+  if (TasmotaGlobal.spi_enabled && PinUsed(GPIO_SDCARD_CS)) {
+    cs = Pin(GPIO_SDCARD_CS);
+  }
+  if (TasmotaGlobal.spi_enabled2 && PinUsed(GPIO_SDCARD_CS, 1)) {
+    spi_bus = 1;
+    cs = Pin(GPIO_SDCARD_CS, 1);
+  }
+  if (cs > -1) {
 
 #ifdef ESP8266
     SPI.begin();
+    if (SD.begin(cs)) {
 #endif // ESP8266
 #ifdef ESP32
-    SPI.begin(Pin(GPIO_SPI_CLK), Pin(GPIO_SPI_MISO), Pin(GPIO_SPI_MOSI), -1);
+    if (1 == spi_bus) {
+      SPI_HSPI.begin(Pin(GPIO_SPI_CLK, spi_bus), Pin(GPIO_SPI_MISO, spi_bus), Pin(GPIO_SPI_MOSI, spi_bus), -1);
+    } else {
+      SPI.begin(Pin(GPIO_SPI_CLK), Pin(GPIO_SPI_MISO), Pin(GPIO_SPI_MOSI), -1);
+    }
+    if (SD.begin(cs, (1 == spi_bus) ? SPI_HSPI : SPI)) {
 #endif // ESP32
-
-    if (SD.begin(cs)) {
 #ifdef ESP8266
       ufsp = &SDFS;
 #endif  // ESP8266
@@ -220,7 +238,7 @@ void UfsCheckSDCardInit(void) {
       AddLog(LOG_LEVEL_INFO, PSTR(D_LOG_UFS "SDCard mounted"));
 #endif // ESP8266
 #ifdef ESP32
-      AddLog(LOG_LEVEL_INFO, PSTR(D_LOG_UFS "SDCard mounted (SPI mode) with %d kB free"), UfsInfo(1, 0));
+      AddLog(LOG_LEVEL_INFO, PSTR(D_LOG_UFS "SDCard mounted (SPI bus%d) with %d kB free"), spi_bus +1, UfsInfo(1, 0));
 #endif // ESP32
     }
   }
@@ -241,6 +259,11 @@ void UfsCheckSDCardInit(void) {
       // AddLog(LOG_LEVEL_DEBUG, "UFS: trying SDIO 1-bit clk=%i cmd=%i d0=%i", sdio_clk, sdio_cmd, sdio_d0);
       SD_MMC.setPins(sdio_clk, sdio_cmd, sdio_d0);
     }
+#if defined(SOC_GP_LDO_SUPPORTED) && defined(SOC_SDMMC_IO_POWER_EXTERNAL)
+    if (!LdoEnabled(4)) {
+      SD_MMC.setPowerChannel(4);  // SD card IO power if not set by command Ldo4 (deprecated)
+    }
+#endif
     if (SD_MMC.begin("/sd", !bit_4_mode /*mode 1 bit*/, false /*format_if_failed*/)) {    // mount under "/sd" to be consistent with SD SPI
       ufsp = &SD_MMC;
 
@@ -373,6 +396,17 @@ uint8_t UfsReject(char *name) {
   return 0;
 }
 
+// return true if SDC
+bool UfsIsSDC(void) {
+#ifndef SDC_HIDE_INVISIBLES
+  return false;
+#else
+  if (((uint32_t)ufsp != (uint32_t)ffsp) && ((uint32_t)ffsp == (uint32_t)dfsp)) return false;
+  if (((uint32_t)ufsp == (uint32_t)ffsp) && (ufs_type != UFS_TSDC)) return false;
+  return true;
+#endif
+}
+
 /*********************************************************************************************\
  * Tfs low level functions
 \*********************************************************************************************/
@@ -478,8 +512,10 @@ bool TfsDeleteFile(const char *fname) {
   if (!ffs_type) { return false; }
 
   if (!ffsp->remove(fname)) {
-    AddLog(LOG_LEVEL_INFO, PSTR("TFS: Delete failed"));
-    return false;
+    if (!ffsp->rmdir(fname)) {
+      AddLog(LOG_LEVEL_INFO, PSTR("TFS: Delete failed"));
+      return false;
+    }
   }
   return true;
 }
@@ -903,8 +939,6 @@ String UfsJsonSettingsRead(const char* key) {
  * Commands
 \*********************************************************************************************/
 
-const int UFS_FILENAME_SIZE = 48;
-
 char* UfsFilename(char* fname, char* fname_in) {
   fname_in = Trim(fname_in);  // Remove possible leading spaces
   snprintf_P(fname, UFS_FILENAME_SIZE, PSTR("%s%s"), ('/' == fname_in[0]) ? "" : "/", fname_in);
@@ -912,7 +946,7 @@ char* UfsFilename(char* fname, char* fname_in) {
 }
 
 const char kUFSCommands[] PROGMEM = "Ufs|"  // Prefix
-  "|Type|Size|Free|Delete|Rename|Run"
+  "|Type|Size|Free|Delete|Rename|Run|List"
 #ifdef UFILESYS_STATIC_SERVING
   "|Serve"
 #endif
@@ -922,7 +956,7 @@ const char kUFSCommands[] PROGMEM = "Ufs|"  // Prefix
   ;
 
 void (* const kUFSCommand[])(void) PROGMEM = {
-  &UFSInfo, &UFSType, &UFSSize, &UFSFree, &UFSDelete, &UFSRename, &UFSRun
+  &UFSInfo, &UFSType, &UFSSize, &UFSFree, &UFSDelete, &UFSRename, &UFSRun, &UFSList
 #ifdef UFILESYS_STATIC_SERVING
   ,&UFSServe
 #endif
@@ -973,7 +1007,7 @@ void UFSDelete(void) {
     if (ffs_type && (ffs_type != ufs_type) && (2 == XdrvMailbox.index)) {
       result = TfsDeleteFile(fname);
     } else {
-      result = (ufs_type && ufsp->remove(fname));
+      result = (ufs_type && (ufsp->remove(fname) || ufsp->rmdir(fname)));
     }
     if (!result) {
       ResponseCmndFailed();
@@ -1006,6 +1040,65 @@ void UFSRename(void) {
     } else {
       ResponseCmndDone();
     }
+  }
+}
+
+bool UFSListDir(char *path, bool hide_dot) {
+  bool update = false;
+
+  File dir = dfsp->open(path, UFS_FILE_READ);
+  if (dir) {
+    dir.rewindDirectory();
+    char *ep;
+    while (true) {
+      File entry = dir.openNextFile();
+      if (!entry) {
+        break;
+      }
+      // esp32 returns path here, shorten to filename
+      ep = (char*)entry.name();
+      if (*ep == '/') { ep++; }
+      char *lcp = strrchr(ep,'/');
+      if (lcp) {
+        ep = lcp + 1;
+      }
+      if (hide_dot && (*ep == '.')) { continue; }
+
+      // osx formatted disks contain a lot of stuff we dont want
+      bool hiddable = UfsReject((char*)ep);
+      if (!hiddable || !UfsIsSDC() ) {
+        String tstr = "";
+        if (!entry.isDirectory()) {   // ESP32 does not support isFile()
+          uint32_t tm = entry.getLastWrite();
+          tstr = GetDT(tm);
+        }
+        ResponseAppend_P(PSTR("%c[\"%s\",\"%s\",%d]"), (!update)?'[':',', EscapeJSONString(ep).c_str(), tstr.c_str(), entry.size());
+        update = true;
+        entry.close();
+
+        yield(); // trigger watchdog reset
+      }
+    }
+    dir.close();
+  }
+  return update;
+}
+
+void UFSList(void) {
+  // UfsList       - List all non-dot files and directories in root directory
+  // UfsList /     - List all non-dot files and directories in root directory
+  // UfsList2      - List all files and directories in root directory
+  // UfsList /dir1 - List all non-dot files and directories in directory dir1
+  bool hide_dot = (XdrvMailbox.index != 2);
+  strlcpy(ufs_path, "/", sizeof(ufs_path));
+  if (XdrvMailbox.data_len > 0) {
+    strlcpy(ufs_path, XdrvMailbox.data, sizeof(ufs_path));
+  }
+  ResponseCmnd();
+  if (UFSListDir(ufs_path, hide_dot)) {
+    ResponseAppend_P(PSTR("]}"));
+  } else {
+    ResponseCmndDone();
   }
 }
 
@@ -1183,8 +1276,6 @@ void UFSRun(void) {
   }
 }
 
-
-
 /*********************************************************************************************\
  * Web support
 \*********************************************************************************************/
@@ -1192,7 +1283,7 @@ void UFSRun(void) {
 #ifdef USE_WEBSERVER
 
 const char UFS_WEB_DIR[] PROGMEM =
-  "<p><form action='ufsd' method='get'><input type='hidden' name='download' value='%s' /> <button>%s</button></form></p>";
+  "<p></p><form action='ufsd' method='get'><input type='hidden' name='download' value='%s' /> <button>%s</button></form>";
 
 const char UFS_CURRDIR[] PROGMEM = 
   "<p>%s: %s</p>";
@@ -1201,9 +1292,6 @@ const char UFS_CURRDIR[] PROGMEM =
   #define D_CURR_DIR "Folder"
 #endif
 
-const char UFS_FORM_FILE_UPLOAD[] PROGMEM =
-  "<div id='f1' name='f1' style='display:block;'>"
-  "<fieldset><legend><b>&nbsp;" D_MANAGE_FILE_SYSTEM "&nbsp;</b></legend>";
 const char UFS_FORM_FILE_UPGc[] PROGMEM =
   "<div style='text-align:left;color:#%06x;'>" D_FS_SIZE " %s MB - " D_FS_FREE " %s MB";
 
@@ -1225,7 +1313,7 @@ const char UFS_FORM_SDC_DIRa[] PROGMEM =
 const char UFS_FORM_SDC_DIRc[] PROGMEM =
   "</div>";
 const char UFS_FORM_FILE_UPGb[] PROGMEM =
-  "<form method='get' action='ufse'><input type='hidden' name='file' value='%s/" D_NEW_FILE "'>"
+  "<input type='hidden' name='file' value='%s/" D_NEW_FILE "'>"
   "<button type='submit'>" D_CREATE_NEW_FILE "</button></form>";
 const char UFS_FORM_FILE_UPGb1[] PROGMEM =
   "<label><input type='checkbox' id='shf' onclick='sf(eb(\"shf\").checked);' name='shf'>" D_SHOW_HIDDEN_FILES "</label>";
@@ -1259,7 +1347,6 @@ const char UFS_FORM_SDC_HREFedit[] PROGMEM =
   "<a href='ufse?file=%s/%s'>&#x1F4DD;</a>"; // 📝
 
 const char HTTP_EDITOR_FORM_START[] PROGMEM =
-  "<fieldset><legend><b>&nbsp;" D_EDIT_FILE "&nbsp;</b></legend>"
   "<form>"
   "<label for='name'>" D_FILE ":</label><input type='text' id='name' name='name' value='%s'><br><hr width='98%%'>"
   "<textarea id='content' name='content' wrap='off' rows='8' cols='80' style='font-size: 12pt'>";
@@ -1270,6 +1357,24 @@ const char HTTP_EDITOR_FORM_END[] PROGMEM =
   "</form></fieldset>";
 
 #endif  // #ifdef GUI_EDIT_FILE
+
+// Wrapper around HandleUploadLoop() for /ufsu file uploads.
+// HandleUploadLoop() is shared between OTA firmware updates (/u2) and filesystem
+// uploads (/ufsu), and uses Web.upload_file_type to distinguish them.
+// When uploading via the web UI, the browser first does a GET which calls
+// UfsDirectory() and sets upload_file_type = UPL_UFSFILE. But direct POST
+// requests (e.g. curl -F "file=@..." /ufsu) skip the GET, leaving
+// upload_file_type unset and causing HandleUploadLoop() to treat the file
+// as a firmware image, which fails.
+// This wrapper ensures upload_file_type is always set before entering the
+// shared upload handler.
+void HandleUploadUFSLoop(void) {
+  if (!WebAuthenticate()) { return; }
+  if (!HttpCheckPriviledgedAccess(false)) { return; }
+
+  Web.upload_file_type = UPL_UFSFILE;
+  HandleUploadLoop();
+}
 
 void HandleUploadUFSDone(void) {
   if (!HttpCheckPriviledgedAccess()) { return; }
@@ -1300,7 +1405,7 @@ void HandleUploadUFSDone(void) {
   }
   WSContentSend_P(PSTR("</div><br>"));
 
-  XdrvCall(FUNC_WEB_ADD_MANAGEMENT_BUTTON);
+  WSContentSend_PD(UFS_WEB_DIR, "/", PSTR(D_MANAGE_FILE_SYSTEM));
 
   WSContentStop();
 }
@@ -1313,7 +1418,7 @@ void UfsDirectory(void) {
   uint8_t depth = 0;
   uint8_t isdir = 0;
 
-  strcpy(ufs_path, "/");
+  strlcpy(ufs_path, "/", sizeof(ufs_path));
 
   if (Webserver->hasArg(F("dir"))) {
     String stmp = Webserver->arg(F("dir"));
@@ -1348,7 +1453,7 @@ void UfsDirectory(void) {
     char *cp = (char*)stmp.c_str();
     if (UfsDownloadFile(cp)) {
       // is directory
-      strcpy(ufs_path, cp);
+      strlcpy(ufs_path, cp, sizeof(ufs_path));
       isdir = 1;
     } else {
       return;
@@ -1357,7 +1462,8 @@ void UfsDirectory(void) {
 
   WSContentStart_P(PSTR(D_MANAGE_FILE_SYSTEM));
   WSContentSendStyle();
-  WSContentSend_P(UFS_FORM_FILE_UPLOAD);
+  WSContentSend_P(HTTP_DIV_F1_BLOCK);
+  WSContentSend_P(HTTP_FIELDSET_LEGEND, PSTR(D_MANAGE_FILE_SYSTEM));
 
   char ts[FLOATSZ];
   dtostrfd((float)UfsInfo(0, ufs_dir == 2 ? 1:0) / 1000, 3, ts);
@@ -1385,9 +1491,10 @@ void UfsDirectory(void) {
   }
   WSContentSend_P(UFS_FORM_SDC_DIRc);
 #ifdef GUI_EDIT_FILE
+  WSContentSend_P(HTTP_FORM_GET_ACTION, PSTR("ufse"));
   WSContentSend_P(UFS_FORM_FILE_UPGb, ufs_path);
 #endif
-  if (!isSDC()) {
+  if (!UfsIsSDC()) {
     WSContentSend_P(UFS_FORM_FILE_UPGb1);
   }
   WSContentSend_P(UFS_FORM_FILE_UPGb2);
@@ -1398,19 +1505,8 @@ void UfsDirectory(void) {
   Web.upload_file_type = UPL_UFSFILE;
 }
 
-// return true if SDC
-bool isSDC(void) {
-#ifndef SDC_HIDE_INVISIBLES
-  return false;
-#else
-  if (((uint32_t)ufsp != (uint32_t)ffsp) && ((uint32_t)ffsp == (uint32_t)dfsp)) return false;
-  if (((uint32_t)ufsp == (uint32_t)ffsp) && (ufs_type != UFS_TSDC)) return false;
-  return true;
-#endif
-}
-
 void UfsListDir(char *path, uint8_t depth) {
-  char name[48];
+  char name[UFS_FILENAME_SIZE];
   char npath[128];
   char format[12];
   sprintf(format, PSTR("%%-%ds"), 24 - depth);
@@ -1462,19 +1558,19 @@ void UfsListDir(char *path, uint8_t depth) {
       // osx formatted disks contain a lot of stuff we dont want
       bool hiddable = UfsReject((char*)ep);
 
-      if (!hiddable || !isSDC() ) {
+      if (!hiddable || !UfsIsSDC() ) {
 
         for (uint8_t cnt = 0; cnt<depth; cnt++) {
           *cp++ = '-';
         }
+        snprintf(cp, sizeof(name) - (cp - name), format, ep);
 
         String pp_escaped_string = UrlEscape(pp);
         String ep_escaped_string = UrlEscape(ep);
         const char* ppe = pp_escaped_string.c_str();    // this can't be merged on a single line otherwise the String object can be freed
         const char* epe = ep_escaped_string.c_str();
-        sprintf(cp, format, ep);
 #ifdef GUI_TRASH_FILE
-        char delpath[128+UFS_FILENAME_SIZE];
+        char delpath[128+UFS_FILENAME_SIZE+(2*strlen(ppe))];
         ext_snprintf_P(delpath, sizeof(delpath), UFS_FORM_SDC_HREFdel, ppe, epe, ppe[0]?ppe:"/");
 #else
         char delpath[2] = " ";
@@ -1488,9 +1584,9 @@ void UfsListDir(char *path, uint8_t depth) {
 #ifdef UFILESYS_RECURSEFOLDERS_GUI
           uint8_t plen = strlen(path);
           if (plen > 1) {
-            strcat(path, "/");
+            strlcat(path, "/", UFS_FILENAME_SIZE);
           }
-          strcat(path, ep);
+          strlcat(path, ep, UFS_FILENAME_SIZE);
           UfsListDir(path, depth + 4);
           path[plen] = 0;
 #endif          
@@ -1594,7 +1690,7 @@ uint8_t UfsDownloadFile(char *file) {
 
   UfsData.download_busy = true;
   char *path = (char*)malloc(128);
-  strcpy(path,file);
+  strlcpy(path, file, 128);
   BaseType_t ret = xTaskCreatePinnedToCore(download_task, "DT", 6000, (void*)path, 3, nullptr, 1);
   if (ret != pdPASS)
     AddLog(LOG_LEVEL_INFO, PSTR(D_LOG_UFS "Download task failed with %d"), ret);
@@ -1653,7 +1749,7 @@ void download_task(void *path) {
 
 
 bool UfsUploadFileOpen(const char* upload_filename) {
-  char npath[48];
+  char npath[UFS_FILENAME_SIZE];
   snprintf_P(npath, sizeof(npath), PSTR("%s/%s"), ufs_path, upload_filename);
   dfsp->remove(npath);
   ufs_upload_file = dfsp->open(npath, UFS_FILE_WRITE);
@@ -1697,6 +1793,7 @@ void UfsEditor(void) {
 
   WSContentStart_P(PSTR(D_EDIT_FILE));
   WSContentSendStyle();
+  WSContentSend_P(HTTP_FIELDSET_LEGEND, PSTR(D_EDIT_FILE));
   char *bfname = fname +1;
   WSContentSend_P(HTTP_EDITOR_FORM_START, bfname);  // Skip leading slash
 
@@ -1714,7 +1811,7 @@ void UfsEditor(void) {
         AddLog(LOG_LEVEL_DEBUG_MORE, PSTR(D_LOG_UFS "UfsEditor: read=%d"), l);
         if (l < 0) { break; }
         buf[l] = '\0';
-        WSContentSend_P(PSTR("%s"), HtmlEscape((char*)buf).c_str());
+        WSContentSendRaw_P( HtmlEscape((char*)buf).c_str());
         filelen -= l;
       }
       fp.close();
@@ -1765,14 +1862,14 @@ void UfsEditorUpload(void) {
   // recursively create folder(s)
   char tmp[UFS_FILENAME_SIZE];
   char folder[UFS_FILENAME_SIZE] = "";
-  strcpy(tmp, fname);
+  strlcpy(tmp, fname, sizeof(tmp));
   // zap file name off the end
   folderOnly(tmp);
   char *tf = strtok(tmp, "/");
   while(tf){
     if (*tf){
-      strcat(folder, "/");
-      strcat(folder, tf);
+      strlcat(folder, "/", sizeof(folder));
+      strlcat(folder, tf, sizeof(folder));
     }
     // we don;t care if it fails - it may already exist.
     dfsp->mkdir(folder);
@@ -1801,7 +1898,7 @@ void UfsEditorUpload(void) {
   // zap file name off the end
   folderOnly(fname);
   char t[20+UFS_FILENAME_SIZE] = "/ufsu?download=";
-  strcat(t, fname);
+  strlcat(t, fname, sizeof(t));
   Webserver->sendHeader(F("Location"), t);
   Webserver->send(303);
 }
@@ -1900,13 +1997,9 @@ bool Xdrv50(uint32_t function) {
       }
       break;
     case FUNC_WEB_ADD_HANDLER:
-//      Webserver->on(F("/ufsd"), UfsDirectory);
-//      Webserver->on(F("/ufsu"), HTTP_GET, UfsDirectory);
-//      Webserver->on(F("/ufsu"), HTTP_POST,[](){Webserver->sendHeader(F("Location"),F("/ufsu"));Webserver->send(303);}, HandleUploadLoop);
       Webserver->on("/ufsd", UfsDirectory);
       Webserver->on("/ufsu", HTTP_GET, UfsDirectory);
-      //Webserver->on("/ufsu", HTTP_POST,[](){Webserver->sendHeader(F("Location"),F("/ufsu"));Webserver->send(303);}, HandleUploadLoop);
-      Webserver->on("/ufsu", HTTP_POST, HandleUploadUFSDone, HandleUploadLoop);
+      Webserver->on("/ufsu", HTTP_POST, HandleUploadUFSDone, HandleUploadUFSLoop);
 #ifdef GUI_EDIT_FILE
       Webserver->on("/ufse", HTTP_GET, UfsEditor);
       Webserver->on("/ufse", HTTP_POST, UfsEditorUpload);

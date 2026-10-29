@@ -22,6 +22,7 @@
 
 #include <berry.h>
 #include <Wire.h>
+#include "esp_wifi.h"
 
 const uint32_t BERRY_MAX_LOGS = 16;   // max number of print output recorded when outside of REPL, used to avoid infinite grow of logs
 const uint32_t BERRY_MAX_REPL_LOGS = 50;   // max number of print output recorded when inside REPL
@@ -119,16 +120,24 @@ extern "C" {
   int32_t l_millis(struct bvm *vm);
   int32_t l_millis(struct bvm *vm) {
     int32_t top = be_top(vm); // Get the number of arguments
-    if (top == 1 || (top == 2 && be_isint(vm, 2))) {  // only 1 argument of type string accepted
+    if (top == 0 || (top == 1 && be_isint(vm, 1))) {  // only 1 argument of type string accepted
       uint32_t delay = 0;
-      if (top == 2) {
-        delay = be_toint(vm, 2);
+      if (top == 1) {
+        delay = be_toint(vm, 1);
       }
       uint32_t ret_millis = millis() + delay;
       be_pushint(vm, ret_millis);
       be_return(vm); // Return
     }
     be_raise(vm, kTypeError, nullptr);
+  }
+
+  // Berry: tasmota.micros() -> int
+  //
+  int32_t l_micros(struct bvm *vm);
+  int32_t l_micros(struct bvm *vm) {
+    be_pushint(vm, micros());
+    be_return(vm); // Return
   }
 
   // Berry: tasmota.get_option(index:int) -> int
@@ -218,6 +227,13 @@ extern "C" {
     // give info about stack size
     be_map_insert_int(vm, "stack_size", SET_ESP32_STACK_SIZE / 1024);
     be_map_insert_real(vm, "stack_low", ((float)uxTaskGetStackHighWaterMark(nullptr)) / 1024);
+    // values seen at last GC
+    if (berry.last_gc_tims_ms >= 0) {
+      be_map_insert_int(vm, "gc_time", berry.last_gc_tims_ms);
+    }
+    if (berry.last_gc_heap_free >= 0) {
+      be_map_insert_int(vm, "gc_heap", berry.last_gc_heap_free / 1024);
+    }
     if (UsePSRAM()) {
       be_map_insert_int(vm, "psram", ESP.getPsramSize() / 1024);
       be_map_insert_int(vm, "psram_free", ESP.getFreePsram() / 1024);
@@ -228,6 +244,20 @@ extern "C" {
     be_pop(vm, 1);
     be_return(vm);
   }
+
+#ifdef USE_HEAP_MAP
+  // Berry: tasmota.heapmap([label:string [, header:bool]]) -> nil
+  //
+  // Log a heap map row with the given label (default "berry"), header forces the table header
+  int32_t l_heapmap(struct bvm *vm);
+  int32_t l_heapmap(struct bvm *vm) {
+    int32_t top = be_top(vm); // Get the number of arguments
+    const char *label = (top >= 1 && be_isstring(vm, 1)) ? be_tostring(vm, 1) : "berry";
+    bool header = (top >= 2) ? be_tobool(vm, 2) : false;
+    HeapMap(label, header);
+    be_return_nil(vm);
+  }
+#endif  // USE_HEAP_MAP
 
   // Berry: tasmota.wifi() -> map
   //
@@ -243,7 +273,7 @@ extern "C" {
       // (-2) map instance, (-1) map
     }
     be_map_insert_str(vm, "mac", WiFiHelper::macAddress().c_str());
-    be_map_insert_bool(vm, "up", WifiHasIP());
+    be_map_insert_bool(vm, "up", WifiHasIP() && Settings->flag4.network_wifi);
     if (Settings->flag4.network_wifi) {
       int32_t rssi = WiFi.RSSI();
       bool show_rssi = false;
@@ -266,6 +296,44 @@ extern "C" {
       if (show_rssi) {
         be_map_insert_int(vm, "rssi", rssi);
         be_map_insert_int(vm, "quality", WifiGetRssiAsQuality(rssi));
+        be_map_insert_str(vm, "ssid", SettingsTextEscaped(SET_STASSID1 + Settings->sta_active).c_str());
+        be_map_insert_str(vm, "bssid", WiFi.BSSIDstr().c_str());
+        be_map_insert_int(vm, "channel", WiFi.channel());
+        wifi_ap_record_t ap_info;
+        if (ESP_OK == esp_wifi_sta_get_ap_info(&ap_info)) {
+          const char * security = "";
+          switch (ap_info.authmode) {
+            case WIFI_AUTH_OPEN:
+              security = "open";  break;
+            case WIFI_AUTH_WEP:
+              security = "wep";   break;
+            case WIFI_AUTH_WPA_PSK:
+              security = "wpa";   break;
+            case WIFI_AUTH_WPA2_PSK:
+            case WIFI_AUTH_WPA_WPA2_PSK:
+            case WIFI_AUTH_WPA2_ENTERPRISE:
+              security = "wpa2";  break;
+            case WIFI_AUTH_WPA3_PSK:
+            case WIFI_AUTH_WPA2_WPA3_PSK:
+            case WIFI_AUTH_WPA3_ENT_192:
+          #if ESP_IDF_VERSION_MAJOR < 6
+            case WIFI_AUTH_WPA3_EXT_PSK:
+            case WIFI_AUTH_WPA3_EXT_PSK_MIXED_MODE:
+          #endif
+              security = "wpa3"; break;
+            default:                          break;
+          }
+          be_map_insert_str(vm, "security", security);
+          // highest PHY mode supported by the access point
+          const char * phy = "";
+          if (ap_info.phy_11ax)       { phy = "11ax"; }
+          else if (ap_info.phy_11ac)  { phy = "11ac"; }
+          else if (ap_info.phy_11n)   { phy = "11n"; }
+          else if (ap_info.phy_11g)   { phy = "11g"; }
+          else if (ap_info.phy_11b)   { phy = "11b"; }
+          else if (ap_info.phy_11a)   { phy = "11a"; }
+          be_map_insert_str(vm, "phy", phy);
+        }
       }
     }
     be_pop(vm, 1);
@@ -800,7 +868,7 @@ extern "C" {
       const char *msg = be_tostring(vm, 2);
       be_pop(vm, top);  // avoid Error be_top is non zero message
 #ifdef USE_WEBSERVER
-      WSContentSend_P(PSTR("%s"), msg);
+      WSContentSendRaw_P( msg);
 #endif  // USE_WEBSERVER
       be_return_nil(vm); // Return nil when something goes wrong
     }
@@ -986,7 +1054,7 @@ extern "C" {
   // ESP object
   int32_t l_arch(bvm *vm);
   int32_t l_arch(bvm *vm) {
-    be_pushstring(vm, ESP32_ARCH);
+    be_pushstring(vm, TASMOTA_ARCH);
     be_return(vm);
   }
 
@@ -1086,7 +1154,7 @@ extern "C" {
     va_start(arg, berry_buf);
     uint32_t len = ext_vsnprintf_P(log_data, LOGSZ-3, berry_buf, arg);
     va_end(arg);
-    if (len+3 > LOGSZ) { strcat(log_data, "..."); }  // Actual data is more
+    if (len+3 > LOGSZ) { strlcat(log_data, "...", sizeof(log_data)); }  // Actual data is more
     TasConsole.printf(log_data);
 #ifdef USE_SERIAL_BRIDGE
     SerialBridgeWrite(log_data, strlen(log_data));
@@ -1104,7 +1172,7 @@ extern "C" {
     va_start(arg, berry_buf);
     uint32_t len = ext_vsnprintf_P(log_data, LOGSZ-3, berry_buf, arg);
     va_end(arg);
-    if (len+3 > LOGSZ) { strcat(log_data, "..."); }  // Actual data is more
+    if (len+3 > LOGSZ) { strlcat(log_data, "...", sizeof(log_data)); }  // Actual data is more
     berry_log(log_data);
   }
 

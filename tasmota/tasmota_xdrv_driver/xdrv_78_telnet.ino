@@ -86,6 +86,7 @@ struct {
   uint8_t     color[3];
   bool        ip_filter_enabled;
   bool        color_disable;
+  bool        overrun;
 } Telnet;
 
 /********************************************************************************************/
@@ -96,6 +97,25 @@ void TelnetWriteColor(uint32_t color) {
   }
 }
 
+void TelnetLDJsonPPCb(const char* line, uint32_t len) {
+  uint32_t textcolor = Telnet.color[Telnet.prompt];
+  uint32_t diffcolor = textcolor;
+  if ((textcolor >= 30) && (textcolor <= 37)) {
+    diffcolor += 60;                               // Highlight color
+  }
+  else if ((textcolor >= 90) && (textcolor <= 97)) {
+    diffcolor -= 60;                               // Lowlight color
+  }
+  char* time_end = (char*)memchr(line, ' ', len);  // Find first word (usually 14:49:36.123-017)
+  uint32_t time_len = time_end - line;
+  TelnetWriteColor(diffcolor);
+  Telnet.client.write(line, time_len);
+  TelnetWriteColor(textcolor);
+  Telnet.client.write(time_end, len - time_len);
+  TelnetWriteColor(0);
+  Telnet.client.println();
+}
+
 void TelnetWrite(char *line, uint32_t len) {
   if (Telnet.client) {
     if (3 == Telnet.prompt) {                        // Print linefeed for non-requested data
@@ -103,28 +123,30 @@ void TelnetWrite(char *line, uint32_t len) {
       Telnet.client.println();
     }
     // line = 14:49:36.123-017 MQTT: stat/wemos5/RESULT = {"POWER":"OFF"}
-    uint32_t textcolor = Telnet.color[Telnet.prompt];
-    uint32_t diffcolor = textcolor;
-    if ((textcolor >= 30) && (textcolor <= 37)) {
-      diffcolor += 60;                               // Highlight color
+
+    if (!LogDataJsonPrettyPrint(line, len, TelnetLDJsonPPCb)) { 
+      TelnetLDJsonPPCb(line, len);
     }
-    else if ((textcolor >= 90) && (textcolor <= 97)) {
-      diffcolor -= 60;                               // Lowlight color
-    }
-    char* time_end = (char*)memchr(line, ' ', len);  // Find first word (usually 14:49:36.123-017)
-    uint32_t time_len = time_end - line;
-    TelnetWriteColor(diffcolor);
-    Telnet.client.write(line, time_len);
-    TelnetWriteColor(textcolor);
-    Telnet.client.write(time_end, len - time_len);
-    TelnetWriteColor(0);
-    Telnet.client.println();
   }
+}
+
+void TelnetGetLog(void) {
+  uint32_t index = Telnet.log_index;                 // Dump log buffer
+  char* line;
+  size_t len;
+  while (GetLog(TasmotaGlobal.seriallog_level, &index, &line, &len)) {
+    TelnetWrite(line, len -1);
+  }
+  Telnet.log_index = index;
 }
 
 /********************************************************************************************/
 
 void TelnetLoop(void) {
+#ifdef USE_XYZMODEM
+  if (XYZModemActive(TXMP_TELNET)) { return; }
+#endif  // USE_XYZMODEM
+
   // check for a new client connection
   if ((Telnet.server) && (Telnet.server->hasClient())) {
     WiFiClient new_client = Telnet.server->available();
@@ -143,70 +165,65 @@ void TelnetLoop(void) {
     }
     Telnet.client = new_client;
     if (Telnet.client) {
+      SetMinimumSeriallog();
       Telnet.client.printf("Tasmota %s %s (%s) %s\r\n", NetworkHostname(), TasmotaGlobal.version, GetBuildDateAndTime().c_str(), GetDeviceHardware().c_str());
-      Telnet.prompt = 3;
-#ifdef ESP32
-      uint32_t index = 1;
-      char* line;
-      size_t len;
-      while (GetLog(Settings->seriallog_level, &index, &line, &len)) {
-        TelnetWrite(line, len -1);
-      }
-      Telnet.prompt = 0;
-#else   // ESP8266
-      Telnet.log_index = 0;                          // Dump start of log buffer for restart messages
-#endif  // ESP32 - ESP8266
+      Telnet.prompt = 3;                             // Print linefeed for non-requested data and use log color
+      Telnet.log_index = 1;                          // Dump start of log buffer for restart messages
+      TelnetGetLog();
+      Telnet.prompt = 1;                             // Print prompt after requested data and use response color
     }
   }
 
   if (Telnet.client) {
-    // Output latest log buffer data
-#ifdef ESP32
-    if (0 == Telnet.prompt) {
+    // Output latest data
+#ifdef ESP8266
+    TelnetGetLog();                                  // As heap is low on ESP8266 it uses log output
+#endif
+    if (1 == Telnet.prompt) {
       TelnetWriteColor(Telnet.color[0]);
       Telnet.client.printf("%s:# ", NetworkHostname());
       TelnetWriteColor(0);
-      Telnet.prompt = 3;                             // Print linefeed for non-requested data
+      Telnet.prompt = 3;                             // Print linefeed for non-requested data and use log color
       while (Telnet.client.available()) { Telnet.client.read(); }  // Flush input
       return;
     }
-#else   // ESP8266
-    uint32_t index = Telnet.log_index;               // Dump log buffer
-    char* line;
-    size_t len;
-    bool any_line = false;
-    while (GetLog(Settings->seriallog_level, &index, &line, &len)) {
-      any_line = true;
-      TelnetWrite(line, len -1);
-    }
-    if (any_line) {
-      if ((0 == Telnet.log_index) || (Telnet.prompt != 2)) {
-        TelnetWriteColor(Telnet.color[0]);
-        Telnet.client.printf("%s:# ", NetworkHostname());
-        TelnetWriteColor(0);
-        Telnet.prompt = 3;                           // Print linefeed for non-requested data
-        while (Telnet.client.available()) { Telnet.client.read(); }  // Flush input
-      }
-      Telnet.log_index = index;
-      return;
-    }
-#endif  // ESP32 - ESP8266
 
     // Input keyboard data
+    bool telnet_iac = false;
     while (Telnet.client.available()) {
       yield();
       uint8_t in_byte = Telnet.client.read();
+
+      if (telnet_iac) {
+        telnet_iac = false;
+        if (in_byte != 0xFF)  {
+          // Process telnet Interpret as Command (IAC) codes
+          AddLog(LOG_LEVEL_DEBUG_MORE, PSTR(D_LOG_TELNET "IAC %d"), in_byte);
+          continue;
+        }
+      }
+      else if (0xFF == in_byte) {                    // Telnet Interpret as Command (IAC)
+        telnet_iac = true;
+        continue;
+      }
+
+#ifdef USE_XYZMODEM
+      if (XYZModemWifiClientStart(&Telnet.client, in_byte)) { return; }
+#endif  // USE_XYZMODEM
+
       if (isprint(in_byte)) {                        // Any char between 32 and 127
         if (Telnet.in_byte_counter < Telnet.buffer_size -1) {  // Add char to string if it still fits
           Telnet.buffer[Telnet.in_byte_counter++] = in_byte;
+        } else {
+          Telnet.overrun = true;
         }
       }
       else if (in_byte == '\n') {
-        Telnet.buffer[Telnet.in_byte_counter] = 0;   // Telnet data completed
-        TasmotaGlobal.seriallog_level = (Settings->seriallog_level < LOG_LEVEL_INFO) ? (uint8_t)LOG_LEVEL_INFO : Settings->seriallog_level;
         Telnet.client.write("\r");                   // Move cursor to begin of line (needed for non-buffered input)
-        Telnet.prompt = 1;                           // Do not print linefeed for requested data and use response color
-        if (Telnet.in_byte_counter >= Telnet.buffer_size) {
+        Telnet.buffer[Telnet.in_byte_counter] = 0;   // Telnet data completed
+        Telnet.prompt = 1;                           // Print prompt after requested data and use response color
+        SetMinimumSeriallog();
+        if (Telnet.overrun) {
           AddLog(LOG_LEVEL_INFO, PSTR(D_LOG_TELNET "Buffer overrun"));
         } else {
           char command[CMDSZ];
@@ -219,9 +236,7 @@ void TelnetLoop(void) {
           }
         }
         Telnet.in_byte_counter = 0;
-#ifdef ESP32
-        Telnet.prompt = 0;                           // Print prompt
-#endif  // ESP32
+        Telnet.overrun = false;
         return;
       }
     }

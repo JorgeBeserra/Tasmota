@@ -32,12 +32,12 @@ typedef struct Z_CommandConverter {
 } Z_CommandConverter;
 
 typedef struct Z_XYZ_Var {    // Holds values for vairables X, Y and Z
-  uint32_t    x = 0;
-  uint32_t    y = 0;
-  uint32_t    z = 0;
-  uint8_t     x_type = 0;     // 0 = no value, 1 = 1 bytes, 2 = 2 bytes
-  uint8_t     y_type = 0;
-  uint8_t     z_type = 0;
+  uint32_t    x;
+  uint32_t    y;
+  uint32_t    z;
+  uint8_t     x_type;     // 0 = no value, 1 = 1 bytes, 2 = 2 bytes
+  uint8_t     y_type;
+  uint8_t     z_type;
 } Z_XYZ_Var;
 
 // Cluster specific commands
@@ -342,7 +342,7 @@ void parseXYZ(const char *model, const SBuffer &payload, struct Z_XYZ_Var *xyz) 
 void convertClusterSpecific(class Z_attribute_list &attr_list, uint16_t cluster, uint8_t cmd, bool direction, uint16_t shortaddr, uint8_t srcendpoint, const SBuffer &payload) {
   const char * command_name = nullptr;
   uint8_t conv_direction;
-  Z_XYZ_Var xyz;
+  Z_XYZ_Var xyz = {};
 
   // always report attribute in raw format
   // Format: "0001!06": "00" = "<cluster>!<cmd>": "<payload>" for commands to devices
@@ -548,8 +548,8 @@ void parseSingleTuyaAttribute(Z_attribute & attr, const SBuffer &buf,
     case 0x04:      // enum 8 bits
       attr.setUInt(buf.get8(i));
       break;
-    case 0x02:      // 4 bytes value (signed?)
-      attr.setUInt(buf.get32BigEndian(i));
+    case 0x02:      // 4 bytes value (signed? Yes, signed!)
+      attr.setInt(buf.get32IBigEndian(i));
       break;
     case 0x03:      // String (we expect it is not ended with \00)
      {
@@ -602,19 +602,38 @@ static void replyTuyaTime( uint16_t cluster, uint16_t shortaddr, uint8_t dstendp
 bool convertTuyaSpecificCluster(class Z_attribute_list &attr_list, uint16_t cluster, uint8_t cmd, bool direction, uint16_t shortaddr, uint8_t srcendpoint, const SBuffer &buf) {
 
   if ((1 == cmd) || (2 == cmd)) {   // attribute report or attribute response
-    // uint16_t seq_number = buf.get16BigEndian(0)
-    uint8_t dpid = buf.get8(2);   // dpid from Tuya documentation
-    uint8_t attr_type = buf.get8(3);   // data type from Tuya documentation
-    uint16_t len = buf.get16BigEndian(4);
-    // create a synthetic attribute with id 'dpid'
-    Z_attribute & attr = attr_list.addAttribute(cluster, (attr_type << 8) | dpid);
-    parseSingleTuyaAttribute(attr, buf, 6, len, attr_type);
-    return true;    // true = remove the original Tuya attribute
+    uint16_t  read_index = 0; // position in the buffer
+    // uint16_t seq_number = buf.get16BigEndian(read_index); // seq
+    read_index += 2;
+
+    // continue while we can read at least 4 bytes: the dpid (u8), the type (u8), and the length (u16)
+    while ((read_index + 4) <= buf.len()) {
+      uint8_t dpid = buf.get8(read_index); // dpid
+      read_index++;
+      uint8_t attr_type = buf.get8(read_index); // data type
+      read_index++;
+      uint16_t len = buf.get16BigEndian(read_index);
+      read_index += 2;
+
+      // ensures we may read at least `len` bytes, if not, the payload is malformed.
+      if ((read_index + len) > buf.len()) {
+        break;
+      }
+
+      // create a synthetic attribute with id 'dpid'
+      Z_attribute & attr = attr_list.addAttribute(cluster, (attr_type << 8) | dpid);
+      parseSingleTuyaAttribute(attr, buf, read_index, len, attr_type);
+      read_index += len;
+    }
+
+    return true; // true = remove the original Tuya attribute
   }
+
   if (0x24 == cmd) {
     replyTuyaTime(cluster, shortaddr, srcendpoint);
     return true;
   }
+
   return false;
 }
 
